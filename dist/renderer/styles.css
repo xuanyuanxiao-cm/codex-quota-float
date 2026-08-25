@@ -1,0 +1,70 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  --ink: #ecf4ff;
+  --muted: #a7bad4;
+  --panel: rgba(16, 27, 48, 0.96);
+  --line: rgba(171, 205, 255, 0.18);
+  --weekly: #8e5cff;
+  --five-hour: #37a7ff;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-width: 100%; min-height: 100%; background: transparent; }
+body { color: var(--ink); overflow: hidden; }
+.quota-app { width: 286px; padding: 12px; transition: width 160ms ease; }
+.orb-shell { display: flex; min-height: 92px; align-items: center; justify-content: flex-end; }
+.orb { position: relative; width: 76px; height: 76px; padding: 0; border: 0; border-radius: 50%; background: rgba(12, 22, 42, 0.94); color: var(--ink); cursor: ns-resize; box-shadow: 0 8px 24px rgba(0,0,0,.3); -webkit-app-region: no-drag; }
+.ring { position: absolute; border-radius: 50%; -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); }
+.ring--weekly { inset: 3px; background: conic-gradient(var(--weekly) var(--progress, 0%), rgba(142,92,255,.16) 0); }
+.ring--five-hour { inset: 11px; background: conic-gradient(var(--five-hour) var(--progress, 0%), rgba(55,167,255,.16) 0); }
+.orb-center { position: absolute; inset: 18px; display: grid; grid-template-rows: 1fr 1px 1fr; place-items: center; font-size: .72rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.center-divider { width: 26px; height: 1px; background: rgba(255,255,255,.78); box-shadow: 0 0 3px rgba(255,255,255,.18); }
+.accessible-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.details { margin-top: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: 0 16px 40px rgba(0,0,0,.32); }
+.is-collapsed .details { display: none; }
+.details-heading, .window-row, .reset-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; }
+.details-heading { grid-template-columns: 1fr auto; margin-bottom: 10px; color: var(--muted); font-size: .76rem; letter-spacing: .08em; text-transform: uppercase; }
+.window-row { padding: 8px 0; border-top: 1px solid var(--line); font-size: .86rem; }
+.window-row strong { font-size: 1rem; }
+.window-row > span:last-child { color: var(--muted); font-size: .75rem; }
+.reset-timing { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.35; }
+.reset-at { font-size: .68rem; white-space: nowrap; }
+.reset-row { padding: 10px 0 2px; border-top: 1px solid var(--line); font-size: .82rem; }
+.reset-row strong { min-width: 2ch; color: #c7b5ff; font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace; font-size: 1rem; text-align: right; }
+.refresh, .reset { padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); cursor: pointer; }
+.reset:not(:disabled) { border-color: rgba(142,92,255,.58); background: rgba(142,92,255,.12); }
+.refresh:disabled { cursor: wait; opacity: .48; }
+.reset:disabled { cursor: not-allowed; opacity: .36; }
+.status-note { margin: 10px 0 0; color: #ffb7ad; font-size: .74rem; }
+.last-updated { margin: 8px 0 0; color: var(--muted); font-size: .7rem; }
+
+.edge-handle { display: none; }
+.is-edge-hidden { width: 14px; height: 56px; padding: 0; transition: none; }
+.is-edge-hidden .orb-shell,
+.is-edge-hidden .details { display: none; }
+.is-edge-hidden .edge-handle {
+  display: grid;
+  width: 14px;
+  height: 56px;
+  padding: 6px 5px;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.edge-handle span {
+  width: 4px;
+  height: 44px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 0 5px rgba(12, 22, 42, 0.38);
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+.edge-handle:hover span,
+.edge-handle:focus-visible span {
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 0 7px rgba(255, 255, 255, 0.32);
+}
+.edge-handle:focus-visible { outline: none; }

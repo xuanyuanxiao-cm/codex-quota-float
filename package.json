@@ -1,0 +1,15 @@
+{
+  "name": "codex-quota-float-companion",
+  "version": "0.1.0",
+  "description": "Compact floating Codex quota companion",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "electron-builder --win portable",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "electron": "32.3.3",
+    "electron-builder": "25.1.8"
+  }
+}

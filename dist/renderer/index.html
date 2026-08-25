@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex Quota</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="./renderer.js" defer></script>
+  </head>
+  <body>
+    <main class="quota-app is-collapsed" data-quota-app data-state="collapsed">
+      <section class="orb-shell" aria-label="Codex quota">
+        <button class="orb" type="button" data-action="toggle-pin" aria-expanded="false" aria-label="Open quota details">
+          <span class="ring ring--weekly" data-window="weekly" role="img" aria-label="Weekly remaining"></span>
+          <span class="ring ring--five-hour" data-window="five-hour" role="img" aria-label="Five-hour remaining"></span>
+          <span class="orb-center" aria-hidden="true">
+            <span data-center="five-hour">…</span>
+            <span class="center-divider"></span>
+            <span data-center="weekly">…</span>
+          </span>
+        </button>
+        <p class="accessible-status" data-accessible-status aria-live="polite">5 Hours 刷新中…. Weekly 刷新中….</p>
+      </section>
+
+      <section class="details" data-details aria-label="Quota details">
+        <div class="details-heading">
+          <span>Quota windows</span>
+          <button class="refresh" type="button" data-action="refresh">Refresh</button>
+        </div>
+        <div class="window-row" data-detail-window="five-hour">
+          <span>5 Hours</span><strong data-value="five-hour">刷新中…</strong>
+          <span class="reset-timing">
+            <span data-countdown="five-hour">刷新中…</span>
+            <span class="reset-at" data-reset-at="five-hour" hidden></span>
+          </span>
+        </div>
+        <div class="window-row" data-detail-window="weekly">
+          <span>Weekly</span><strong data-value="weekly">刷新中…</strong>
+          <span class="reset-timing">
+            <span data-countdown="weekly">刷新中…</span>
+            <span class="reset-at" data-reset-at="weekly" hidden></span>
+          </span>
+        </div>
+        <div class="reset-row">
+          <span>Resets</span><strong data-reset-count>—</strong><button class="reset" type="button" data-action="reset" disabled>Reset</button>
+        </div>
+        <p class="status-note" data-note hidden></p>
+        <p class="last-updated" data-last-updated hidden></p>
+      </section>
+
+      <button class="edge-handle" type="button" data-action="restore-from-edge" aria-label="显示悬浮球">
+        <span aria-hidden="true"></span>
+      </button>
+    </main>
+  </body>
+</html>

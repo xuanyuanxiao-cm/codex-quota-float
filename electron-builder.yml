@@ -1,0 +1,22 @@
+appId: com.openai.codex-quota-float
+productName: Codex Quota Float
+
+files:
+  - dist/**/*
+  - assets/**/*
+  - package.json
+
+asar: true
+
+directories:
+  output: release
+
+win:
+  icon: assets/codex-quota-float.ico
+  target:
+    - target: portable
+      arch:
+        - x64
+
+portable:
+  artifactName: Codex Quota Float.exe
