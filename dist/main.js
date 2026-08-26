@@ -7,6 +7,7 @@ exports.registerQuotaActions = registerQuotaActions;
 exports.dockWindowOnRight = dockWindowOnRight;
 exports.createMainWindow = createMainWindow;
 exports.createAppServerUnavailableState = createAppServerUnavailableState;
+exports.configureWindowsAppIdentity = configureWindowsAppIdentity;
 exports.startCompanion = startCompanion;
 const node_path_1 = __importDefault(require("node:path"));
 const node_fs_1 = require("node:fs");
@@ -81,7 +82,11 @@ function createAppServerUnavailableState() {
         errorMessage: 'Codex app-server unavailable. Sign in in Codex and try again.',
     };
 }
+function configureWindowsAppIdentity(app) {
+    app.setAppUserModelId?.('com.openai.codex-quota-float');
+}
 function startCompanion(deps = loadElectronDeps()) {
+    configureWindowsAppIdentity(deps.app);
     const client = new app_server_client_1.AppServerClient();
     const controller = new refresh_controller_1.RefreshController(client);
     let window;

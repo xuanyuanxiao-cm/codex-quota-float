@@ -14,9 +14,17 @@ directories:
 win:
   icon: assets/codex-quota-float.ico
   target:
+    - target: nsis
+      arch:
+        - x64
     - target: portable
       arch:
         - x64
 
+nsis:
+  artifactName: Codex Quota Float Setup ${version}.exe
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
 portable:
-  artifactName: Codex Quota Float.exe
+  artifactName: Codex Quota Float Portable ${version}.exe

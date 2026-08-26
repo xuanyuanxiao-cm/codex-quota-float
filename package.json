@@ -5,7 +5,7 @@
   "private": true,
   "main": "dist/main.js",
   "scripts": {
-    "build": "electron-builder --win portable",
+    "build": "electron-builder --win",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {
