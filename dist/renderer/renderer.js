@@ -153,19 +153,6 @@
       note.hidden = model.note === null;
       fallback.textContent = `5 Hours ${model.fiveHourText}. Weekly ${model.weeklyText}.`;
     };
-    const onPointerEnter = () => {
-      if (dragStartScreenY !== void 0) return;
-      if (interaction !== "pinned") {
-        interaction = "hoverOpen";
-        renderInteraction();
-      }
-    };
-    const onDetailsLeave = () => {
-      if (interaction !== "pinned") {
-        interaction = "collapsed";
-        renderInteraction();
-      }
-    };
     const togglePinned = () => {
       interaction = interaction === "pinned" ? "collapsed" : "pinned";
       renderInteraction();
@@ -235,8 +222,6 @@
       renderInteraction();
       root.classList.toggle("is-edge-hidden", hidden);
     };
-    root.addEventListener("pointerenter", onPointerEnter);
-    details.addEventListener("pointerleave", onDetailsLeave);
     orb.addEventListener("click", onOrbClick);
     orb.addEventListener("dblclick", onOrbDoubleClick);
     orb.addEventListener("pointerdown", onOrbPointerDown);
@@ -251,8 +236,6 @@
     return () => {
       unsubscribe();
       unsubscribeEdgeHidden();
-      root.removeEventListener("pointerenter", onPointerEnter);
-      details.removeEventListener("pointerleave", onDetailsLeave);
       orb.removeEventListener("click", onOrbClick);
       orb.removeEventListener("dblclick", onOrbDoubleClick);
       orb.removeEventListener("pointerdown", onOrbPointerDown);
