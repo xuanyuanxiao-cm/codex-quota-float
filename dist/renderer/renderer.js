@@ -60,7 +60,7 @@
       lastUpdatedText: formatLastUpdatedAt(state.lastUpdatedAt),
       refreshDisabled: state.status === "loading",
       resetCountText: resetCount === null ? UNAVAILABLE : String(Math.max(0, Math.floor(resetCount))),
-      resetDisabled: resetCount === null || resetCount <= 0 || state.isResetting || state.status === "loading",
+      resetDisabled: resetCount === null || resetCount <= 0 || !state.resetCredits.credits.some((credit) => credit.status === "available") || state.isResetting || state.status === "loading",
       note: state.status === "loading" ? "\u6B63\u5728\u5237\u65B0\u2026" : state.errorMessage
     };
   }
@@ -86,11 +86,6 @@
   }
 
   // src/renderer/renderer.ts
-  async function requestQuotaReset(api, confirmReset) {
-    if (!confirmReset()) return false;
-    await api.resetQuota();
-    return true;
-  }
   function setProgress(element, percent) {
     element.style.setProperty("--progress", `${Math.max(0, Math.min(100, percent))}%`);
   }
@@ -105,6 +100,12 @@
     const refresh = root.querySelector('[data-action="refresh"]');
     const reset = root.querySelector('[data-action="reset"]');
     const resetCount = root.querySelector("[data-reset-count]");
+    const creditPicker = root.querySelector("[data-credit-picker]");
+    const creditList = root.querySelector("[data-credit-list]");
+    const pickerSelection = root.querySelector("[data-picker-selection]");
+    const creditError = root.querySelector("[data-credit-error]");
+    const cancelReset = root.querySelector('[data-action="cancel-reset"]');
+    const confirmReset = root.querySelector('[data-action="confirm-reset"]');
     const edgeHandle = root.querySelector('[data-action="restore-from-edge"]');
     const fiveHourRing = root.querySelector('[data-window="five-hour"]');
     const weeklyRing = root.querySelector('[data-window="weekly"]');
@@ -119,10 +120,13 @@
     const lastUpdated = root.querySelector("[data-last-updated]");
     const fallback = root.querySelector("[data-accessible-status]");
     const note = root.querySelector("[data-note]");
-    if (!orb || !details || !refresh || !reset || !resetCount || !edgeHandle || !fiveHourRing || !weeklyRing || !fiveHourCenter || !weeklyCenter || !fiveHourText || !weeklyText || !fiveHourCountdown || !fiveHourResetAt || !weeklyCountdown || !weeklyResetAt || !lastUpdated || !fallback || !note) {
+    if (!orb || !details || !refresh || !reset || !resetCount || !creditPicker || !creditList || !pickerSelection || !creditError || !cancelReset || !confirmReset || !edgeHandle || !fiveHourRing || !weeklyRing || !fiveHourCenter || !weeklyCenter || !fiveHourText || !weeklyText || !fiveHourCountdown || !fiveHourResetAt || !weeklyCountdown || !weeklyResetAt || !lastUpdated || !fallback || !note) {
       throw new Error("Quota renderer markup is incomplete");
     }
     let interaction = "collapsed";
+    let latestState;
+    let selectedCreditId;
+    let resetPending = false;
     let dragStartScreenY;
     let dragPointerOffsetY = 0;
     let movedDuringDrag = false;
@@ -132,7 +136,43 @@
       root.classList.toggle("is-pinned", interaction === "pinned");
       orb.setAttribute("aria-expanded", String(interaction !== "collapsed"));
     };
+    const availableCredits = (state) => state.resetCredits?.credits.filter((credit) => credit.status === "available") ?? [];
+    const creditName = (index) => `重置卡 ${index + 1}`;
+    const renderCreditPicker = (state) => {
+      const credits = availableCredits(state);
+      if (!credits.some((credit) => credit.id === selectedCreditId)) selectedCreditId = credits[0]?.id;
+      creditList.replaceChildren(...credits.map((credit, index) => {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "credit-option";
+        option.dataset.creditId = credit.id;
+        option.setAttribute("aria-pressed", String(credit.id === selectedCreditId));
+        const name = document.createElement("span");
+        name.textContent = creditName(index);
+        const expiry = document.createElement("span");
+        const expiryText = Number.isFinite(credit.expiresAt)
+          ? `${new Date(toMillis(credit.expiresAt)).toLocaleDateString("zh-CN")} 到期`
+          : "到期时间未知";
+        expiry.textContent = `${expiryText} · 编号 …${credit.id.slice(-4)}`;
+        option.append(name, expiry);
+        option.addEventListener("click", () => {
+          selectedCreditId = credit.id;
+          creditError.hidden = true;
+          renderCreditPicker(latestState);
+        });
+        return option;
+      }));
+      const selected = credits.find((credit) => credit.id === selectedCreditId);
+      pickerSelection.textContent = selected ? `将使用：${creditName(credits.indexOf(selected))}` : "没有可用重置卡";
+      confirmReset.disabled = !selected || state.isResetting || resetPending;
+    };
+    const closeCreditPicker = () => {
+      creditPicker.hidden = true;
+      root.classList.toggle("is-picking", false);
+      creditError.hidden = true;
+    };
     const renderState = (state) => {
+      latestState = state;
       const model = buildRendererViewModel(state, now());
       setProgress(fiveHourRing, model.fiveHourRingPercent);
       setProgress(weeklyRing, model.weeklyRingPercent);
@@ -152,6 +192,7 @@
       note.textContent = model.note ?? "";
       note.hidden = model.note === null;
       fallback.textContent = `5 Hours ${model.fiveHourText}. Weekly ${model.weeklyText}.`;
+      if (!creditPicker.hidden) renderCreditPicker(state);
     };
     const togglePinned = () => {
       interaction = interaction === "pinned" ? "collapsed" : "pinned";
@@ -206,13 +247,34 @@
     };
     const onReset = () => {
       if (reset.disabled) return;
-      reset.disabled = true;
-      void requestQuotaReset(
-        api,
-        () => window.confirm("Use one quota reset? This cannot be undone.")
-      ).then((confirmed) => {
-        if (!confirmed) reset.disabled = false;
-      }).catch(() => void 0);
+      selectedCreditId = void 0;
+      creditError.hidden = true;
+      creditPicker.hidden = false;
+      root.classList.toggle("is-picking", true);
+      renderCreditPicker(latestState);
+    };
+    const onCancelReset = () => {
+      if (!resetPending) closeCreditPicker();
+    };
+    const onConfirmReset = async () => {
+      if (confirmReset.disabled || !selectedCreditId) return;
+      resetPending = true;
+      confirmReset.disabled = true;
+      try {
+        const result = await api.resetQuota(selectedCreditId);
+        if (result?.outcome === "reset" || result?.outcome === "alreadyRedeemed") {
+          closeCreditPicker();
+        } else {
+          creditError.textContent = "未完成重置，请刷新后重试";
+          creditError.hidden = false;
+        }
+      } catch {
+        creditError.textContent = "额度重置失败，请稍后重试";
+        creditError.hidden = false;
+      } finally {
+        resetPending = false;
+        if (!creditPicker.hidden) renderCreditPicker(latestState);
+      }
     };
     const onRestoreFromEdge = () => {
       void api.setEdgeHidden(false);
@@ -220,6 +282,7 @@
     const renderEdgeHidden = (hidden) => {
       interaction = "collapsed";
       renderInteraction();
+      closeCreditPicker();
       root.classList.toggle("is-edge-hidden", hidden);
     };
     orb.addEventListener("click", onOrbClick);
@@ -229,6 +292,8 @@
     window.addEventListener("pointerup", onOrbPointerUp);
     refresh.addEventListener("click", onRefresh);
     reset.addEventListener("click", onReset);
+    cancelReset.addEventListener("click", onCancelReset);
+    confirmReset.addEventListener("click", onConfirmReset);
     edgeHandle.addEventListener("click", onRestoreFromEdge);
     renderInteraction();
     const unsubscribe = api.subscribe(renderState);
@@ -243,6 +308,8 @@
       window.removeEventListener("pointerup", onOrbPointerUp);
       refresh.removeEventListener("click", onRefresh);
       reset.removeEventListener("click", onReset);
+      cancelReset.removeEventListener("click", onCancelReset);
+      confirmReset.removeEventListener("click", onConfirmReset);
       edgeHandle.removeEventListener("click", onRestoreFromEdge);
       clickArbiter.dispose();
     };

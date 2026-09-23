@@ -7,7 +7,7 @@ const subscribe = (listener) => {
     return () => electron_1.ipcRenderer.removeListener('quota:state', handler);
 };
 const refreshNow = () => electron_1.ipcRenderer.invoke('quota:refresh-now');
-const resetQuota = () => electron_1.ipcRenderer.invoke('quota:reset');
+const resetQuota = (creditId) => electron_1.ipcRenderer.invoke('quota:reset', creditId);
 const moveToY = (screenY, pointerOffsetY) => electron_1.ipcRenderer.invoke('quota:move-to-y', screenY, pointerOffsetY);
 const startDrag = (pointerOffsetY) => electron_1.ipcRenderer.invoke('quota:start-drag', pointerOffsetY);
 const stopDrag = () => electron_1.ipcRenderer.invoke('quota:stop-drag');

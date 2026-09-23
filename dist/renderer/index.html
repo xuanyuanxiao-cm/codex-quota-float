@@ -44,6 +44,16 @@
         <div class="reset-row">
           <span>Resets</span><strong data-reset-count>—</strong><button class="reset" type="button" data-action="reset" disabled>Reset</button>
         </div>
+        <section class="credit-picker" data-credit-picker aria-label="选择重置卡" hidden>
+          <div class="credit-picker-heading"><strong>选择重置卡</strong><button type="button" data-action="cancel-reset" aria-label="关闭选卡列表">×</button></div>
+          <p>默认选择最快过期的卡，也可以手动更换。</p>
+          <div class="credit-list" data-credit-list role="group" aria-label="可用重置卡"></div>
+          <div class="credit-picker-footer">
+            <span data-picker-selection aria-live="polite"></span>
+            <span class="credit-error" data-credit-error role="alert" hidden></span>
+            <button class="credit-confirm" type="button" data-action="confirm-reset">确认重置</button>
+          </div>
+        </section>
         <p class="status-note" data-note hidden></p>
         <p class="last-updated" data-last-updated hidden></p>
       </section>

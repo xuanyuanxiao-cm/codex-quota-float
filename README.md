@@ -11,6 +11,7 @@ A compact floating Codex quota monitor for Windows.
 - Separate remaining percentages divided by a white rule
 - Compact countdown and absolute reset-time display
 - Always-on-top floating panel with manual refresh and reset controls
+- Select a reset credit before confirming; the earliest-expiring available credit is preselected
 
 ## Development
 

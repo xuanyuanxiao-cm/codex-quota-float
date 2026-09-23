@@ -34,12 +34,20 @@ test('opens the details panel only after clicking the orb', async () => {
   const root = element(['is-collapsed']);
   const orb = element();
   const details = element();
+  const creditPicker = element();
+  creditPicker.hidden = true;
   const selectors = new Map([
     ['[data-action="toggle-pin"]', orb],
     ['[data-details]', details],
     ['[data-action="refresh"]', element()],
     ['[data-action="reset"]', element()],
     ['[data-reset-count]', element()],
+    ['[data-credit-picker]', creditPicker],
+    ['[data-credit-list]', element()],
+    ['[data-picker-selection]', element()],
+    ['[data-credit-error]', element()],
+    ['[data-action="cancel-reset"]', element()],
+    ['[data-action="confirm-reset"]', element()],
     ['[data-action="restore-from-edge"]', element()],
     ['[data-window="five-hour"]', element()],
     ['[data-window="weekly"]', element()],

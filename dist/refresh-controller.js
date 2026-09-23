@@ -22,7 +22,11 @@ function cloneResetCredits(resetCredits) {
         return null;
     return {
         availableCount: resetCredits.availableCount,
-        credits: resetCredits.credits.map((credit) => ({ ...credit })),
+        credits: resetCredits.credits.map((credit) => ({ ...credit })).sort((first, second) => {
+            const firstExpiry = Number.isFinite(first.expiresAt) ? first.expiresAt : Infinity;
+            const secondExpiry = Number.isFinite(second.expiresAt) ? second.expiresAt : Infinity;
+            return firstExpiry - secondExpiry;
+        }),
     };
 }
 function mergeWindow(current, update) {
@@ -117,10 +121,10 @@ class RefreshController {
         this.inFlight = operation;
         return operation;
     }
-    resetQuota() {
+    resetQuota(creditId) {
         if (this.resetInFlight)
             return this.resetInFlight;
-        const credit = this.state.resetCredits?.credits.find((candidate) => candidate.status === 'available');
+        const credit = this.state.resetCredits?.credits.find((candidate) => candidate.status === 'available' && (creditId === undefined || candidate.id === creditId));
         if (!this.started || !credit)
             return Promise.resolve({ outcome: 'noCredit' });
         this.emit({ ...this.state, isResetting: true, errorMessage: null });

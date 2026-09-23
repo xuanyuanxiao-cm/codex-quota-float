@@ -18,7 +18,7 @@ const usage_model_1 = require("./usage-model");
 const window_position_1 = require("./window-position");
 function registerQuotaActions(ipcMain, controller) {
     ipcMain.handle('quota:refresh-now', () => controller.refreshNow());
-    ipcMain.handle('quota:reset', () => controller.resetQuota());
+    ipcMain.handle('quota:reset', (_event, creditId) => controller.resetQuota(creditId));
 }
 function dockWindowOnRight(window, workArea, requestedY) {
     const position = (0, window_position_1.rightDockPosition)(workArea, window_position_1.NORMAL_WINDOW_SIZE, requestedY);

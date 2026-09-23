@@ -38,12 +38,20 @@ test('renders both quota rings and the two percentage-only center values', () =>
   const weeklyResetAt = element();
   const details = element();
   const orb = element();
+  const creditPicker = element();
+  creditPicker.hidden = true;
   const selectors = new Map([
     ['[data-action="toggle-pin"]', orb],
     ['[data-details]', details],
     ['[data-action="refresh"]', element()],
     ['[data-action="reset"]', element()],
     ['[data-reset-count]', element()],
+    ['[data-credit-picker]', creditPicker],
+    ['[data-credit-list]', element()],
+    ['[data-picker-selection]', element()],
+    ['[data-credit-error]', element()],
+    ['[data-action="cancel-reset"]', element()],
+    ['[data-action="confirm-reset"]', element()],
     ['[data-action="restore-from-edge"]', element()],
     ['[data-window="five-hour"]', fiveHourRing],
     ['[data-window="weekly"]', weeklyRing],
