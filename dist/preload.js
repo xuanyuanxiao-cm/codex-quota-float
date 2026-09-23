@@ -12,6 +12,7 @@ const moveToY = (screenY, pointerOffsetY) => electron_1.ipcRenderer.invoke('quot
 const startDrag = (pointerOffsetY) => electron_1.ipcRenderer.invoke('quota:start-drag', pointerOffsetY);
 const stopDrag = () => electron_1.ipcRenderer.invoke('quota:stop-drag');
 const setEdgeHidden = (hidden) => electron_1.ipcRenderer.invoke('quota:set-edge-hidden', hidden);
+const setExpanded = (expanded) => electron_1.ipcRenderer.invoke('quota:set-expanded', expanded);
 const subscribeEdgeHidden = (listener) => {
     const handler = (_event, hidden) => listener(hidden);
     electron_1.ipcRenderer.on('quota:edge-hidden', handler);
@@ -25,5 +26,6 @@ electron_1.contextBridge.exposeInMainWorld('quota', {
     startDrag,
     stopDrag,
     setEdgeHidden,
+    setExpanded,
     subscribeEdgeHidden,
 });

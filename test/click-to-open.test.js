@@ -31,6 +31,7 @@ function element(initialClasses = []) {
 }
 
 test('opens the details panel only after clicking the orb', async () => {
+  const expandedChanges = [];
   const root = element(['is-collapsed']);
   const orb = element();
   const details = element();
@@ -74,6 +75,7 @@ test('opens the details panel only after clicking the orb', async () => {
     startDrag() {},
     stopDrag() {},
     setEdgeHidden() {},
+    setExpanded(value) { expandedChanges.push(value); },
   };
   const windowObject = element();
   windowObject.quota = quota;
@@ -99,4 +101,10 @@ test('opens the details panel only after clicking the orb', async () => {
   await new Promise((resolve) => setTimeout(resolve, 250));
   assert.equal(orb.attributes.get('aria-expanded'), 'true');
   assert.equal(root.classList.contains('is-collapsed'), false);
+  assert.deepEqual(expandedChanges, [true]);
+
+  orb.dispatch('click');
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.equal(root.classList.contains('is-collapsed'), true);
+  assert.deepEqual(expandedChanges, [true, false]);
 });

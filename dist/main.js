@@ -50,8 +50,8 @@ function saveDockY(filePath, y) {
 }
 function createMainWindow(BrowserWindow, preloadPath = node_path_1.default.join(__dirname, 'preload.js'), rendererPath = node_path_1.default.join(__dirname, 'renderer', 'index.html'), iconPath = node_path_1.default.join(__dirname, '..', 'assets', 'codex-quota-float.ico')) {
     const window = new BrowserWindow({
-        width: window_position_1.NORMAL_WINDOW_SIZE.width,
-        height: window_position_1.NORMAL_WINDOW_SIZE.height,
+        width: window_position_1.COLLAPSED_WINDOW_SIZE.width,
+        height: window_position_1.COLLAPSED_WINDOW_SIZE.height,
         icon: iconPath,
         transparent: true,
         frame: false,
@@ -95,7 +95,7 @@ function startCompanion(deps = loadElectronDeps()) {
     let refreshing = false;
     let resourcesStopped = false;
     let dragTimer;
-    let windowLayout = 'normal';
+    let windowLayout = 'collapsed';
     let normalDockY;
     const stopResources = () => {
         if (resourcesStopped)
@@ -127,18 +127,29 @@ function startCompanion(deps = loadElectronDeps()) {
         const workAreaFor = (bounds) => deps.screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea;
         const dockPath = savedDockPath(deps.app.getPath('userData'));
         const initialBounds = (0, window_position_1.rightDockBounds)(workAreaFor(window.getBounds()), 'normal', readSavedDockY(dockPath));
-        window.setBounds(initialBounds);
         normalDockY = initialBounds.y;
+        window.setBounds((0, window_position_1.rightDockBounds)(workAreaFor(window.getBounds()), windowLayout, normalDockY));
+        const moveDockedWindow = (workArea, screenY, pointerOffsetY) => {
+            if (!window)
+                return;
+            const requestedNormalY = screenY - pointerOffsetY - (windowLayout === 'collapsed' ? 8 : 0);
+            if (windowLayout === 'normal') {
+                normalDockY = dockWindowOnRight(window, workArea, requestedNormalY).y;
+            }
+            else {
+                normalDockY = (0, window_position_1.rightDockPosition)(workArea, window_position_1.NORMAL_WINDOW_SIZE, requestedNormalY).y;
+                window.setBounds((0, window_position_1.rightDockBounds)(workArea, windowLayout, normalDockY));
+            }
+            saveDockY(dockPath, normalDockY);
+        };
         const setEdgeHidden = (hidden) => {
             if (!window)
                 return;
             if (dragTimer)
                 clearInterval(dragTimer);
             dragTimer = undefined;
-            windowLayout = hidden ? 'edgeHidden' : 'normal';
+            windowLayout = hidden ? 'edgeHidden' : 'collapsed';
             const bounds = (0, window_position_1.rightDockBounds)(workAreaFor(window.getBounds()), windowLayout, normalDockY);
-            if (windowLayout === 'normal')
-                normalDockY = bounds.y;
             window.setBounds(bounds);
             window.webContents.send('quota:edge-hidden', hidden);
         };
@@ -147,29 +158,32 @@ function startCompanion(deps = loadElectronDeps()) {
             if (typeof hidden === 'boolean')
                 setEdgeHidden(hidden);
         });
+        deps.ipcMain.handle('quota:set-expanded', (...args) => {
+            const expanded = args[1];
+            if (!window || windowLayout === 'edgeHidden' || typeof expanded !== 'boolean')
+                return;
+            windowLayout = expanded ? 'normal' : 'collapsed';
+            window.setBounds((0, window_position_1.rightDockBounds)(workAreaFor(window.getBounds()), windowLayout, normalDockY));
+        });
         deps.ipcMain.handle('quota:move-to-y', (...args) => {
             const screenY = args[1];
             const pointerOffsetY = args[2];
-            if (!window || windowLayout !== 'normal' || typeof screenY !== 'number' || typeof pointerOffsetY !== 'number')
+            if (!window || windowLayout === 'edgeHidden' || typeof screenY !== 'number' || typeof pointerOffsetY !== 'number')
                 return;
-            const position = dockWindowOnRight(window, workAreaFor(window.getBounds()), screenY - pointerOffsetY);
-            normalDockY = position.y;
-            saveDockY(dockPath, position.y);
+            moveDockedWindow(workAreaFor(window.getBounds()), screenY, pointerOffsetY);
         });
         deps.ipcMain.handle('quota:start-drag', (...args) => {
             const pointerOffsetY = args[1];
-            if (!window || windowLayout !== 'normal' || typeof pointerOffsetY !== 'number')
+            if (!window || windowLayout === 'edgeHidden' || typeof pointerOffsetY !== 'number')
                 return;
             if (dragTimer)
                 clearInterval(dragTimer);
             dragTimer = setInterval(() => {
-                if (!window || windowLayout !== 'normal')
+                if (!window || windowLayout === 'edgeHidden')
                     return;
                 const cursor = deps.screen.getCursorScreenPoint();
                 const display = deps.screen.getDisplayNearestPoint(cursor).workArea;
-                const position = dockWindowOnRight(window, display, cursor.y - pointerOffsetY);
-                normalDockY = position.y;
-                saveDockY(dockPath, position.y);
+                moveDockedWindow(display, cursor.y, pointerOffsetY);
             }, 16);
         });
         deps.ipcMain.handle('quota:stop-drag', () => {
@@ -183,18 +197,19 @@ function startCompanion(deps = loadElectronDeps()) {
             if (!window || !newBounds)
                 return;
             event?.preventDefault?.();
-            const bounds = (0, window_position_1.rightDockBounds)(workAreaFor(newBounds), windowLayout, windowLayout === 'normal' ? newBounds.y : normalDockY);
+            const workArea = workAreaFor(newBounds);
+            const requestedNormalY = windowLayout === 'normal' ? newBounds.y : windowLayout === 'collapsed' ? newBounds.y - 8 : normalDockY;
+            normalDockY = (0, window_position_1.rightDockPosition)(workArea, window_position_1.NORMAL_WINDOW_SIZE, requestedNormalY).y;
+            const bounds = (0, window_position_1.rightDockBounds)(workArea, windowLayout, normalDockY);
             window.setBounds(bounds);
-            if (windowLayout === 'normal') {
-                normalDockY = bounds.y;
-                saveDockY(dockPath, bounds.y);
-            }
+            if (windowLayout !== 'edgeHidden')
+                saveDockY(dockPath, normalDockY);
         });
         window.on('move', () => {
             const bounds = window?.getBounds();
             if (!bounds || !window)
                 return;
-            const expected = (0, window_position_1.rightDockBounds)(workAreaFor(bounds), windowLayout, windowLayout === 'normal' ? bounds.y : normalDockY);
+            const expected = (0, window_position_1.rightDockBounds)(workAreaFor(bounds), windowLayout, normalDockY);
             if (bounds.x !== expected.x ||
                 bounds.y !== expected.y ||
                 bounds.width !== expected.width ||

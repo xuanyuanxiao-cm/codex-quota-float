@@ -197,6 +197,7 @@
     const togglePinned = () => {
       interaction = interaction === "pinned" ? "collapsed" : "pinned";
       renderInteraction();
+      void api.setExpanded(interaction === "pinned");
     };
     const hideToEdge = () => {
       interaction = "collapsed";
