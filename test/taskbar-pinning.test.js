@@ -26,4 +26,6 @@ test('build configuration produces both installer and portable packages', () => 
   assert.match(config, /- target: nsis/);
   assert.match(config, /- target: portable/);
   assert.match(config, /createStartMenuShortcut: true/);
+  assert.match(config, /icon: assets\/codex-quota-float.ico/);
+  assert.doesNotMatch(config, /signAndEditExecutable: false/);
 });

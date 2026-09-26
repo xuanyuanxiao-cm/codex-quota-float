@@ -157,6 +157,8 @@ class AppServerClient {
         this.disconnectChild(child, new Error('AppServerClient stopped'));
     }
     attachChild(child) {
+        // Drain unused diagnostics so a full stderr pipe cannot block RPC replies.
+        child.stderr?.resume?.();
         child.stdout.on('data', (chunk) => this.handleData(child, chunk));
         child.stdin.on?.('error', (error) => this.disconnectChild(child, error));
         child.on('error', (error) => this.disconnectChild(child, error));

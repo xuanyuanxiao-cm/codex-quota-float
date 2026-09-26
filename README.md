@@ -30,6 +30,8 @@ A compact floating Codex quota monitor for Windows.
 - Each app-server request has a 15-second timeout; quota reads retain bounded retries, while reset consumption is never automatically replayed
 - Reset completion always triggers a fresh quota and reset-card read; a reset timeout reports an unconfirmed result and asks you to refresh
 - Window size follows the visible panel; blank corners and gaps are excluded from the native Windows hit region
+- Closing the floating window hides it to the tray and keeps quota and trend updates running. Choose Exit in either context menu to stop the app.
+- On short screens or at high display scaling, the details panel scrolls while the orb remains visible. The panel adapts when the display work area changes.
 
 ## Development
 
@@ -53,9 +55,14 @@ pnpm test:window --force-device-scale-factor=1.25
 pnpm test:alerts
 pnpm test:trends
 pnpm test:notices
+pnpm test:regressions
 ```
 
 Add `--interactive` to open a checkerboard behind the companion for native click-through checks. These tests never connect to the quota service or consume reset cards.
+
+`test:regressions` checks scrolling at a 500-DIP work-area height, resizing back to a taller display, closing to tray, restoring the window, and shutdown cleanup. The unit suite also verifies quota responses while a child process writes a large volume of diagnostic output.
+
+All active unit tests use `node:test` in `test/`. The old compiled Vitest tests have been migrated or consolidated with current coverage; see [test migration notes](test/README.md).
 
 The alert test uses a real Electron window with offline quota data and simulated desktop notifications. It checks badge colors, native hit regions, notification click actions, and the notification toggle, and saves actual UI previews in `release/alerts-preview/`. Windows controls the appearance and delivery of native desktop notifications.
 

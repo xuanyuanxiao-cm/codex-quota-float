@@ -146,6 +146,8 @@ test('renders both quota rings and the two percentage-only center values', () =>
   }
   assert.equal(selectors.get('[data-plan]').textContent, 'Pro');
   assert.equal(weeklyCenter.textContent, '73%');
+  assert.equal(weeklyResetAt.hidden, true);
+  assert.equal(weeklyResetAt.textContent, '');
   assert.doesNotMatch(selectors.get('[data-accessible-status]').textContent, /5 Hours/);
   renderState({ ...weeklyOnly, planType: 'plus', hasFiveHour: true, fiveHour: { remainingPercent: 82, resetsAt: null } });
   assert.equal(fiveHourRing.hidden, false);

@@ -104,8 +104,12 @@ function createMainWindow(BrowserWindow, preloadPath = node_path_1.default.join(
 }
 function loadElectronDeps() {
     // Keep Electron out of the module top level so renderer/controller tests run in
-    // Vitest without initializing an Electron process.
+    // Node without initializing an Electron process.
     return require('electron');
+}
+function sendToWindow(window, channel, ...args) {
+    if (window && !window.isDestroyed?.() && !window.webContents.isDestroyed?.())
+        window.webContents.send(channel, ...args);
 }
 function createAppServerUnavailableState() {
     return {
@@ -130,6 +134,7 @@ function startCompanion(deps = loadElectronDeps()) {
     let refreshing = false;
     let resourcesStopped = false;
     let dragTimer;
+    let onDisplayChanged;
     let windowLayout = 'collapsed';
     let contentHeight = window_position_1.COLLAPSED_WINDOW_SIZE.height;
     let regions = [{ x: 12, y: 12, width: 76, height: 76, radius: 38 }];
@@ -155,6 +160,10 @@ function startCompanion(deps = loadElectronDeps()) {
         notifications.clear();
         if (dragTimer)
             clearInterval(dragTimer);
+        if (onDisplayChanged) {
+            deps.screen.removeListener?.('display-metrics-changed', onDisplayChanged);
+            deps.screen.removeListener?.('display-removed', onDisplayChanged);
+        }
         void client.stop();
     };
     const quit = () => {
@@ -166,10 +175,10 @@ function startCompanion(deps = loadElectronDeps()) {
     controller.subscribe((state) => {
         refreshing = state.status === 'loading';
         const result = alerts?.update(state);
-        if (history?.record(state)) trendsWindow?.webContents.send('quota:history-updated');
+        if (history?.record(state)) sendToWindow(trendsWindow, 'quota:history-updated');
         latestState = result ? { ...state, alerts: result.alerts } : state;
         notices?.updateAccount(state);
-        window?.webContents.send('quota:state', latestState);
+        sendToWindow(window, 'quota:state', latestState);
         if (deps.Notification?.isSupported()) {
             for (const message of result?.notifications ?? []) {
                 try {
@@ -232,8 +241,8 @@ function startCompanion(deps = loadElectronDeps()) {
         notices = new ResetNotices(node_path_1.default.join(deps.app.getPath('userData'), 'codex-reset-notices.json'), {
             ...deps.noticeOptions,
             onChange: (state) => {
-                window?.webContents.send('quota:notices', state);
-                noticesWindow?.webContents.send('quota:notices', state);
+                sendToWindow(window, 'quota:notices', state);
+                sendToWindow(noticesWindow, 'quota:notices', state);
             },
             onNotice: (record) => {
                 if (!alerts.saved.enabled || !deps.Notification?.isSupported()) return;
@@ -265,8 +274,16 @@ function startCompanion(deps = loadElectronDeps()) {
         // Unit tests use minimal Electron doubles; start networking only in a real runtime.
         if (deps.app.isPackaged !== undefined) notices.start();
         window = createMainWindow(deps.BrowserWindow);
+        window.on('close', (event) => {
+            if (!resourcesStopped) {
+                event.preventDefault();
+                window.hide();
+            }
+        });
+        window.on('closed', () => { window = undefined; });
         window.webContents.on?.('did-finish-load', () => {
-            if (latestState) window.webContents.send('quota:state', latestState);
+            if (latestState) sendToWindow(window, 'quota:state', latestState);
+            if (window) sendToWindow(window, 'quota:work-area-height', workAreaFor(window.getBounds()).height);
         });
         window.setMovable(false);
         const workAreaFor = (bounds) => deps.screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea;
@@ -279,8 +296,12 @@ function startCompanion(deps = loadElectronDeps()) {
                 normalDockY = bounds.y;
             window.setBounds(bounds);
             window.setShape((0, window_position_1.createWindowShape)(regions));
+            sendToWindow(window, 'quota:work-area-height', workArea.height);
         };
         applyLayout();
+        onDisplayChanged = () => { if (window) applyLayout(); };
+        deps.screen.on?.('display-metrics-changed', onDisplayChanged);
+        deps.screen.on?.('display-removed', onDisplayChanged);
         const moveDockedWindow = (workArea, screenY, pointerOffsetY) => {
             if (!window)
                 return;
@@ -300,13 +321,13 @@ function startCompanion(deps = loadElectronDeps()) {
             contentHeight = window_position_1.COLLAPSED_WINDOW_SIZE.height;
             regions = hidden ? [{ x: 0, y: 0, width: 14, height: 56, radius: 0 }] : [{ x: 12, y: 12, width: 76, height: 76, radius: 38 }];
             applyLayout();
-            window.webContents.send('quota:edge-hidden', hidden);
+            sendToWindow(window, 'quota:edge-hidden', hidden);
         };
         openNotification = (target) => {
             setEdgeHidden(false);
             window?.show?.();
             window?.focus?.();
-            window?.webContents.send('quota:open-details', target);
+            sendToWindow(window, 'quota:open-details', target);
         };
         deps.ipcMain.handle('quota:set-edge-hidden', (...args) => {
             const hidden = args[1];
@@ -378,7 +399,7 @@ function startCompanion(deps = loadElectronDeps()) {
             }
         });
         if (latestState)
-            window.webContents.send('quota:state', latestState);
+            sendToWindow(window, 'quota:state', latestState);
         window.webContents.on?.('context-menu', (...args) => {
             const event = args[0];
             event?.preventDefault?.();
@@ -439,7 +460,7 @@ function startCompanion(deps = loadElectronDeps()) {
         catch {
             refreshing = false;
             latestState = createAppServerUnavailableState();
-            window?.webContents.send('quota:state', latestState);
+            sendToWindow(window, 'quota:state', latestState);
         }
     });
 }

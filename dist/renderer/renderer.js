@@ -403,6 +403,10 @@
     const resizeObserver = new ResizeObserver(syncWindowLayout);
     resizeObserver.observe(root);
     const unsubscribe = api.subscribe(renderState);
+    const unsubscribeWorkAreaHeight = api.subscribeWorkAreaHeight?.((height) => {
+      root.style.setProperty('--work-area-height', `${height}px`);
+      syncWindowLayout();
+    });
     const unsubscribeEdgeHidden = api.subscribeEdgeHidden(renderEdgeHidden);
     const unsubscribeOpenDetails = api.subscribeOpenDetails?.((target) => {
       interaction = "pinned";
@@ -415,6 +419,7 @@
     }, 30000);
     return () => {
       unsubscribe();
+      unsubscribeWorkAreaHeight?.();
       unsubscribeEdgeHidden();
       unsubscribeOpenDetails?.();
       unsubscribeNotices?.();

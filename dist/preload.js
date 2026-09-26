@@ -24,6 +24,11 @@ const subscribeOpenDetails = (listener) => {
     return () => electron_1.ipcRenderer.removeListener('quota:open-details', handler);
 };
 electron_1.contextBridge.exposeInMainWorld('quota', {
+    subscribeWorkAreaHeight: (listener) => {
+        const handler = (_event, height) => listener(height);
+        electron_1.ipcRenderer.on('quota:work-area-height', handler);
+        return () => electron_1.ipcRenderer.removeListener('quota:work-area-height', handler);
+    },
     openNotices: () => electron_1.ipcRenderer.invoke('quota:open-notices'),
     readNotices: () => electron_1.ipcRenderer.invoke('quota:read-notices'),
     refreshNotices: () => electron_1.ipcRenderer.invoke('quota:refresh-notices'),

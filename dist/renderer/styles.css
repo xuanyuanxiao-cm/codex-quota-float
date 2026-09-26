@@ -15,10 +15,10 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; min-width: 100%; min-height: 100%; background: transparent; }
 body { color: var(--ink); overflow: hidden; }
-.quota-app { width: 286px; padding: 12px; }
+.quota-app { display: flex; flex-direction: column; width: 286px; padding: 12px; max-height: var(--work-area-height, 10000px); }
 .quota-app.is-collapsed:not(.is-edge-hidden) { width: 100px; }
 .is-collapsed .orb-shell { min-height: 76px; }
-.orb-shell { display: flex; min-height: 92px; align-items: center; justify-content: flex-end; }
+.orb-shell { display: flex; flex-shrink: 0; min-height: 92px; align-items: center; justify-content: flex-end; }
 .orb { position: relative; width: 76px; height: 76px; padding: 0; border: 0; border-radius: 50%; background: rgba(12, 22, 42, 0.94); color: var(--ink); cursor: ns-resize; -webkit-app-region: no-drag; }
 .ring { position: absolute; border-radius: 50%; -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); }
 .ring--weekly { inset: 3px; background: conic-gradient(var(--weekly) var(--progress, 0%), rgba(142,92,255,.16) 0); }
@@ -28,7 +28,7 @@ body { color: var(--ink); overflow: hidden; }
 .is-weekly-only .orb-center { grid-template-rows: 1fr; font-size: 1.1rem; }
 .window-row[hidden] { display: none; }
 .accessible-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.details { margin-top: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
+.details { min-height: 0; overflow-y: auto; margin-top: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
 .is-collapsed .details { display: none; }
 .details-heading, .window-row, .reset-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; }
 .details-heading { grid-template-columns: 1fr auto; margin-bottom: 10px; color: var(--muted); font-size: .76rem; letter-spacing: .08em; text-transform: uppercase; }
@@ -111,7 +111,7 @@ body { color: var(--ink); overflow: hidden; }
 .orb-alert.alert-notice { left: -2px; right: auto; background: #67e8e2; color: #082b30; font-size: 11px; font-weight: 800; }
 .notice-button { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; width: 100%; padding: 9px; border: 1px solid #285767; border-radius: 8px; background: #122b39; color: #d9f8f7; text-align: left; font: inherit; font-size: .78rem; cursor: pointer; }
 .notice-button [data-notice-summary] { color: #9ebdc9; font-size: .7rem; }
-.probability-tag { display: block; margin: 8px 0 0 auto; width: 76px; height: 23px; padding: 0; border: 1px solid #354a63; border-radius: 12px; background: #132035; color: #dce7f4; font: inherit; font-size: 10px; cursor: pointer; }
+.probability-tag { display: block; flex-shrink: 0; margin: 8px 0 0 auto; width: 76px; height: 23px; padding: 0; border: 1px solid #354a63; border-radius: 12px; background: #132035; color: #dce7f4; font: inherit; font-size: 10px; cursor: pointer; }
 .probability-tag[hidden], .is-picking .probability-tag, .is-edge-hidden .probability-tag { display: none; }
 .probability-panel { display: block; width: 100%; margin-top: 10px; padding: 9px; border: 1px solid #3c566f; border-radius: 9px; background: #15263b; color: #ecf4ff; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .probability-panel > span { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
