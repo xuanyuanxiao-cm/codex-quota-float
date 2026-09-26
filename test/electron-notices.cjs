@@ -18,7 +18,7 @@ const url = id => `https://x.com/thsottiaux/status/${id}`;
 let remaining = 19;
 let weeklyOnly = false;
 let credits = ['test-card'];
-let communityStale = false;
+let communityStale = false, communityFail = false;
 AppServerClient.prototype.start = async () => {};
 AppServerClient.prototype.stop = async () => {};
 AppServerClient.prototype.onRateLimitsUpdated = () => () => {};
@@ -32,9 +32,10 @@ const windows = [], notifications = [], handlers = new Map(), opened = [];
 let shape;
 startCompanion({ ...electron,
     noticeOptions: { now: () => now, canVerify: () => true, loadCommunity: async () => {
+        if (communityFail) throw new Error('offline');
         const data = snapshot(Math.min(now, Date.now()), items);
         data.dataHealth.stale = communityStale; return data;
-    }, scrapePage: async address => original(address.split('/').at(-1)) },
+    }, scrapePage: async address => ({ html: original(address.split('/').at(-1)), translation: { originalText: "We'll reset usage limits for all paid users across Codex.", chineseText: '我们将为所有付费用户重置 Codex 的使用额度。' } }) },
     BrowserWindow: class extends BrowserWindow {
         constructor(options) { super({ ...options, show: false }); windows.push(this); }
         setShape(value) { shape = value; super.setShape(value); }
@@ -57,6 +58,7 @@ async function until(predicate) {
 const evaluate = (win, code) => win.webContents.executeJavaScript(code);
 async function capture(win, name) {
     const dest = path.join(__dirname, '..', 'release', 'notices-preview'); fs.mkdirSync(dest, { recursive: true });
+    await evaluate(win, 'new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))');
     fs.writeFileSync(path.join(dest, name + '.png'), (await win.webContents.capturePage()).toPNG());
 }
 (async () => {
@@ -79,18 +81,30 @@ async function capture(win, name) {
     await evaluate(windows[0], 'document.querySelector("[data-action=notices]").click()');
     await until(() => windows.length === 2 && !windows[1].webContents.isLoading());
     await until(() => evaluate(windows[1], 'document.getElementById("status").textContent.includes("已预告")'));
+    assert.equal(await evaluate(windows[1], 'document.getElementById("quote-zh").textContent'), '我们将为所有付费用户重置 Codex 的使用额度。');
+    assert.equal(await evaluate(windows[1], 'document.getElementById("translation-wrap").hidden'), false);
+    assert.equal(await evaluate(windows[1], 'document.getElementById("check").disabled'), true);
+    assert.match(await evaluate(windows[1], 'document.getElementById("check").textContent'), /后可检查/);
+    assert.equal(await evaluate(windows[1], 'document.getElementById("sync-status").hidden && document.getElementById("sync-reason").hidden'), true, 'successful checks show timestamps without redundant cooling messages');
     const folds = () => evaluate(windows[1], `['account-fold','history-fold'].map(id => document.getElementById(id).open)`);
-    assert.deepEqual(await folds(), [true, false], 'account is visible; history starts collapsed');
+    assert.deepEqual(await evaluate(windows[1], 'Array.from(document.querySelectorAll("details[open]")).map(element => element.id)'), ['detail'], 'announcement details open while community explanation stays collapsed');
+    assert.equal(await evaluate(windows[1], 'document.querySelector("main").children[1].id'), 'sync-panel');
+    assert.equal(await evaluate(windows[1], 'document.getElementById("sync-panel").tagName'), 'SECTION', 'check status is always visible without a disclosure control');
+    await evaluate(windows[1], `['forecast-fold','detail'].forEach(id => document.getElementById(id).querySelector('summary').click())`);
+    await handlers.get('quota:refresh-now')();
+    assert.deepEqual(await evaluate(windows[1], `['forecast-fold','detail'].map(id => document.getElementById(id).open)`), [true, false], 'updates preserve manual choices for every panel');
+    await evaluate(windows[1], `['forecast-fold','detail'].forEach(id => document.getElementById(id).querySelector('summary').click())`);
+    assert.deepEqual(await folds(), [false, false], 'account and history start collapsed');
     await evaluate(windows[1], `['account-fold','history-fold'].forEach(id => document.getElementById(id).querySelector('summary').click())`);
     await handlers.get('quota:refresh-now')();
-    assert.deepEqual(await folds(), [false, true], 'updates preserve manual expansion');
+    assert.deepEqual(await folds(), [true, true], 'updates preserve manual expansion');
     await evaluate(windows[1], `['account-fold','history-fold'].forEach(id => document.getElementById(id).querySelector('summary').click())`);
     await evaluate(windows[1], 'document.getElementById("original").click()');
     await until(() => opened.length === 1); assert.equal(opened[0], url('12345678902'));
     await handlers.get('quota:open-notice-source')(null, 'https://evil.test'); assert.equal(opened.length, 1);
     await evaluate(windows[1], 'document.getElementById("mark-read").click()');
     await until(() => evaluate(windows[0], 'document.querySelector("[data-orb-notice]").hidden'));
-    assert.equal(await evaluate(windows[1], 'document.getElementById("forecast-value").textContent'), '已有重置预告', 'reading does not erase the announcement');
+    assert.equal(await evaluate(windows[1], 'document.getElementById("forecast-value").textContent'), 'Tibo 预告将重置', 'reading does not erase the announcement');
     now += HOUR; items.unshift({ id: '12345678903', time: now - 1000 });
     await handlers.get('quota:refresh-notices')();
     await until(() => evaluate(windows[1], '!document.getElementById("new-notice").hidden'));
@@ -108,15 +122,15 @@ async function capture(win, name) {
     remaining = 100; await handlers.get('quota:refresh-now')();
     await until(() => evaluate(windows[1], 'document.getElementById("account-status").classList.contains("recovered") && document.getElementById("account-values").textContent.includes("100%")'));
     assert.equal(await evaluate(windows[1], 'document.body.scrollWidth > innerWidth'), false);
-    assert.deepEqual(await folds(), [true, false], 'updates preserve both sections');
+    assert.deepEqual(await folds(), [false, false], 'updates preserve both sections');
     await capture(windows[0], 'expanded');
     await capture(windows[1], 'detail');
     credits.push('new-card'); await handlers.get('quota:refresh-now')();
     await until(() => evaluate(windows[1], 'document.getElementById("account-status").textContent.includes("新增 1 张")'));
     assert.match(await evaluate(windows[1], 'document.getElementById("account-values").textContent'), /重置卡 2/);
     communityStale = true; now += HOUR; await handlers.get('quota:refresh-notices')();
-    await until(() => evaluate(windows[1], 'document.getElementById("forecast-value").textContent === "—"'));
-    assert.match(await evaluate(windows[1], 'document.getElementById("forecast-note").textContent'), /暂停/);
+    await until(() => evaluate(windows[1], 'document.getElementById("forecast-value").textContent === "暂时无法预测"'));
+    assert.match(await evaluate(windows[1], 'document.getElementById("forecast-note").textContent'), /暂不展示/);
     await capture(windows[1], 'stale');
     weeklyOnly = true;
     await handlers.get('quota:refresh-now')();
@@ -127,6 +141,36 @@ async function capture(win, name) {
     await evaluate(windows[1], 'document.getElementById("enabled").click()');
     await until(() => !handlers.get('quota:read-notices')().enabled);
     assert.equal(await evaluate(windows[1], 'document.getElementById("check").disabled'), true);
+    now += HOUR;
+    await evaluate(windows[1], `Date.now = () => ${now}; void 0`);
+    await until(() => evaluate(windows[1], '!document.getElementById("check").disabled'));
+    assert.match(await evaluate(windows[1], 'document.getElementById("sync-reason").textContent'), /仍可手动/);
+    communityFail = true;
+    await evaluate(windows[1], 'document.getElementById("check").click()');
+    await until(() => evaluate(windows[1], 'document.getElementById("check").textContent === "30 秒后可重试"'));
+    assert.equal(handlers.get('quota:read-notices')().enabled, false);
+    await capture(windows[1], 'retry');
+    now += 30000;
+    await evaluate(windows[1], `Date.now = () => ${now}; void 0`);
+    await until(() => evaluate(windows[1], 'document.getElementById("check").textContent === "立即重试"'));
+    communityFail = false; communityStale = false;
+    await evaluate(windows[1], 'document.getElementById("check").click()');
+    await until(() => evaluate(windows[1], 'document.getElementById("check").textContent === "10 分 00 秒后可检查"'));
+    assert.equal(handlers.get('quota:read-notices')().error, null);
+    assert.equal(handlers.get('quota:read-notices')().enabled, false);
+    await capture(windows[1], 'paused-manual-success');
+    const reported = handlers.get('quota:read-notices')();
+    reported.forecast.asOf = Date.now();
+    reported.activeNotice.stage = 'completed'; reported.activeNotice.verified = false;
+    windows[0].webContents.send('quota:notices', reported); windows[1].webContents.send('quota:notices', reported);
+    await until(() => evaluate(windows[1], 'document.getElementById("forecast-value").textContent === "社区报告已重置"'));
+    assert.match(await evaluate(windows[1], 'document.getElementById("forecast-note").textContent'), /原帖只确认了预告/);
+    assert.match(await evaluate(windows[1], 'document.getElementById("forecast-evidence").textContent'), /明确预告将重置额度/);
+    assert.equal(await evaluate(windows[0], 'document.querySelector("[data-probability-tag]").textContent'), '社区记录重置');
+    assert.deepEqual(await folds(), [false, false]);
+    assert.deepEqual(await evaluate(windows[1], 'Array.from(document.querySelectorAll("details[open]")).map(element => element.id)'), ['detail'], 'new community progress preserves the collapsed explanation');
+    assert.equal(await evaluate(windows[1], 'document.body.scrollWidth > innerWidth'), false);
+    await capture(windows[1], 'community-completion-explained');
     console.log(JSON.stringify({ noticesUI: 'passed', announcements: 2, unreadIsolation: true, staleForecastHidden: true, cardArrival: true, originalLinks: opened.length, cardConsumption: 0 }));
     app.quit();
 })().catch(error => { console.error(error); app.exit(1); });

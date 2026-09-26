@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { ResetNotices, classifyPost, originalPost, HOUR, DAY } = require('../dist/notices');
+const { ResetNotices, classifyPost, originalPost, HOUR, DAY, AUTO_INTERVAL } = require('../dist/notices');
 const { INTERVAL } = require('../dist/community-reset');
 const { noticePresentation } = require('../dist/renderer/notice-presentation');
 const { url, postText, original, snapshot } = require('./notice-fixtures.cjs');
@@ -30,16 +30,16 @@ test('classifier separates announcements, completion, grants and unrelated expla
 });
 test('first sync is silent; new posts notify once and reading does not change announcement state', async t => {
     const s = setup(t); await s.service.refresh(); assert.deepEqual(s.notified, []);
-    s.advance(INTERVAL); s.items([{ id: '12345678902', time: NOW + 1000 }]); await s.service.refresh();
+    s.advance(AUTO_INTERVAL); s.items([{ id: '12345678902', time: NOW + 1000 }]); await s.service.refresh();
     assert.deepEqual(s.notified, ['12345678902']); assert.equal(s.service.view().unread, 1);
     const before = noticePresentation(s.service.view(), s.now());
     s.service.markRead('12345678902'); assert.equal(s.service.view().unread, 0);
     assert.deepEqual(noticePresentation(s.service.view(), s.now()), before);
     const restarted = new ResetNotices(s.service.file, s.options); t.after(() => restarted.stop());
-    s.advance(INTERVAL); await restarted.refresh(); assert.equal(s.notified.length, 1);
+    s.advance(AUTO_INTERVAL); await restarted.refresh(); assert.equal(s.notified.length, 1);
 });
 test('only the selected announcement is marked read', async t => {
-    const s = setup(t); await s.service.refresh(); s.advance(INTERVAL);
+    const s = setup(t); await s.service.refresh(); s.advance(AUTO_INTERVAL);
     s.items([{ id: '12345678903', time: NOW + 2000 }, { id: '12345678902', time: NOW + 1000 }]);
     await s.service.refresh(); assert.equal(s.service.view().unread, 2);
     s.service.markRead('12345678902'); assert.equal(s.service.view().unread, 1);
@@ -77,13 +77,51 @@ test('manual checks, restart and concurrent calls respect the ten-minute interva
     const count = s.calls.length; s.advance(60000); await s.service.refresh(true); assert.equal(s.calls.length, count);
     const restarted = new ResetNotices(s.service.file, s.options); t.after(() => restarted.stop());
     await restarted.refresh(true); assert.equal(s.calls.length, count);
-    s.service.setEnabled(false); s.advance(HOUR); await s.service.refresh(true); assert.equal(s.calls.length, count);
+    s.service.setEnabled(false); s.advance(HOUR); await s.service.refresh(); assert.equal(s.calls.length, count);
+    await s.service.refresh(true); assert.ok(s.calls.length > count);
+    assert.equal(s.service.view().enabled, false); assert.equal(s.service.view().nextCheckAt, null);
+});
+
+test('failed checks allow manual retry after 30 seconds without shortening automatic backoff', async t => {
+    const s = setup(t); s.fail(true); await s.service.refresh();
+    assert.equal(s.service.view().manualCheckAt, s.now() + 30000);
+    assert.equal(s.service.view().nextCheckAt, s.now() + HOUR);
+    s.advance(29999); await s.service.refresh(true); assert.equal(s.calls.length, 1);
+    const restarted = new ResetNotices(s.service.file, s.options); t.after(() => restarted.stop());
+    await restarted.refresh(true); assert.equal(s.calls.length, 1);
+    s.advance(1); await s.service.refresh(); assert.equal(s.calls.length, 1);
+    s.fail(false); await s.service.refresh(true);
+    assert.equal(s.service.view().failures, 0);
+    assert.equal(s.service.view().manualCheckAt, s.now() + INTERVAL);
+    const count = s.calls.length; await s.service.refresh(true); assert.equal(s.calls.length, count);
+});
+
+test('manual checks work while paused, including original verification and error reporting', async t => {
+    const s = setup(t); s.service.setEnabled(false);
+    await s.service.refresh(); assert.equal(s.calls.length, 0);
+    await s.service.refresh(true);
+    assert.equal(s.service.view().records[0].verified, true);
+    assert.equal(s.service.view().enabled, false);
+    s.advance(INTERVAL); s.fail(true); await s.service.refresh(true);
+    assert.ok(s.service.view().error); assert.equal(s.service.view().manualCheckAt, s.now() + 30000);
+    assert.equal(s.service.view().nextCheckAt, null);
+});
+
+test('pausing automatic checks does not cancel an explicit manual request', async t => {
+    const s = setup(t); let resolve;
+    s.service.loadCommunity = () => new Promise(r => { resolve = r; });
+    const pending = s.service.refresh(true); s.service.setEnabled(false);
+    resolve(snapshot(NOW, [{ id: '12345678901', time: NOW - HOUR }]));
+    await pending;
+    assert.equal(s.service.view().records[0].verified, true);
+    assert.equal(s.service.view().enabled, false);
+    assert.equal(s.service.view().loading, false);
 });
 test('network failure retains records but suppresses the forecast and backs off', async t => {
-    const s = setup(t); await s.service.refresh(); s.advance(INTERVAL); s.fail(true); await s.service.refresh();
+    const s = setup(t); await s.service.refresh(); s.advance(AUTO_INTERVAL); s.fail(true); await s.service.refresh();
     assert.equal(s.service.view().records.length, 1);
     assert.equal(noticePresentation(s.service.view(), s.now()).value, '—');
-    assert.equal(s.service.view().nextCheckAt, s.now() + 2 * INTERVAL);
+    assert.equal(s.service.view().nextCheckAt, s.now() + HOUR);
     const restarted = new ResetNotices(s.service.file, s.options); t.after(() => restarted.stop());
     assert.equal(noticePresentation(restarted.view(), s.now()).value, '—', 'restart preserves failure state');
     s.advance(31 * DAY); assert.equal(s.service.view().records.length, 0);
@@ -115,4 +153,70 @@ test('card arrival uses new IDs, never first reads, missing readings or stale re
     s.service.updateAccount(state(null)); s.service.updateAccount(state(['a', 'b'])); assert.equal(s.service.view().cardArrival, null);
     s.service.updateAccount(state(['b', 'c'])); assert.equal(s.service.view().cardArrival.count, 1);
     assert.equal(s.service.view().account.fiveHour, 20); assert.deepEqual(s.service.view().recoveries, {});
+});
+
+test('Chinese translation is cached against the exact original and survives restart', async t => {
+    const s = setup(t); let requests = 0;
+    const chineseText = '我们将为所有付费用户重置 Codex 的使用额度。';
+    s.service.scrapePage = async address => { requests++; return { html: original(address.split('/').at(-1)), translation: { originalText: postText, chineseText } }; };
+    await s.service.refresh();
+    assert.equal(s.service.view().records[0].chineseText, chineseText);
+    assert.equal(s.service.view().records[0].stage, 'announced');
+    s.advance(6 * HOUR); await s.service.refresh(); assert.equal(requests, 1);
+    const restarted = new ResetNotices(s.service.file, s.options); t.after(() => restarted.stop());
+    assert.equal(restarted.view().records[0].translationOriginalText, postText);
+    assert.equal(restarted.view().records[0].chineseText, chineseText);
+});
+
+test('mismatched translation is withheld; backfill preserves read and verification state', async t => {
+    const s = setup(t);
+    s.service.scrapePage = async address => ({ html: original(address.split('/').at(-1)), translation: { originalText: 'A different reply', chineseText: '已经完成重置。' } });
+    await s.service.refresh();
+    assert.equal(s.service.view().records[0].chineseText, undefined);
+    assert.equal(s.service.view().records[0].verified, true);
+    s.service.saved.records[0].read = false;
+    const verifiedAt = s.service.view().records[0].verifiedAt;
+    s.advance(6 * HOUR);
+    s.service.scrapePage = async address => ({ html: original(address.split('/').at(-1)), translation: { originalText: postText, chineseText: '我们将重置所有付费用户的 Codex 使用额度。' } });
+    await s.service.refresh();
+    assert.ok(s.service.view().records[0].chineseText);
+    assert.equal(s.service.view().records[0].read, false);
+    assert.equal(s.service.view().records[0].verifiedAt, verifiedAt);
+    assert.deepEqual(s.notified, []);
+});
+
+test('translation failures are bounded and leave verified originals usable', async t => {
+    const s = setup(t); await s.service.refresh();
+    let attempts = 0;
+    s.service.scrapePage = async () => { attempts++; throw Error('offline'); };
+    for (let i = 0; i < 4; i++) { s.advance(6 * HOUR); await s.service.refresh(); }
+    const record = s.service.view().records[0];
+    assert.equal(attempts, 2);
+    assert.equal(record.verificationStatus, 'verified');
+    assert.equal(record.originalText, postText);
+    assert.equal(record.chineseText, undefined);
+});
+
+test('changed source content removes an obsolete translation', async t => {
+    const s = setup(t);
+    s.service.scrapePage = async address => ({ html: original(address.split('/').at(-1)), translation: { originalText: postText, chineseText: '我们将重置额度。' } });
+    await s.service.refresh(); assert.ok(s.service.view().records[0].chineseText);
+    s.advance(AUTO_INTERVAL);
+    s.items([{ id: '12345678901', time: NOW - HOUR, text: 'Edited post' }]);
+    s.service.canVerify = () => false; await s.service.refresh();
+    assert.equal(s.service.view().records[0].chineseText, null);
+    assert.equal(s.service.view().records[0].originalText, null);
+});
+
+test('automatic checks wait thirty minutes while manual checks remain available after ten', async t => {
+    const s = setup(t); await s.service.refresh();
+    assert.equal(s.service.view().nextCheckAt, NOW + 30 * 60000);
+    assert.equal(s.service.view().manualCheckAt, NOW + 10 * 60000);
+    const count = s.calls.length;
+    s.advance(INTERVAL); await s.service.refresh(); assert.equal(s.calls.length, count);
+    s.advance(AUTO_INTERVAL - INTERVAL - 1); await s.service.refresh(); assert.equal(s.calls.length, count);
+    s.advance(1); await s.service.refresh(); assert.ok(s.calls.length > count);
+    const afterAuto = s.calls.length;
+    s.advance(INTERVAL); await s.service.refresh(true); assert.ok(s.calls.length > afterAuto);
+    assert.equal(s.service.view().nextCheckAt, s.now() + AUTO_INTERVAL);
 });

@@ -21,12 +21,25 @@ section { margin-top: 20px; } .account, footer, #history { border-top: 1px solid
 footer { margin-top: 22px; font-size: 13px; } footer input { accent-color: #67e8e2; }
 details { margin-top: 14px; } summary { color: #a7bad4; cursor: pointer; font-size: 12px; }
 #quote { font-size: 12px; color: #bdcde0; white-space: pre-wrap; }
+#translation-wrap { border-top: 1px solid #2d3c53; margin-top: 10px; padding-top: 8px; }
+#quote-zh { white-space: pre-wrap; }
+#sync-panel { font-size: 13px; }
+#sync-panel p { margin: 7px 0; }
+#sync-panel.failed #sync-status, #sync-panel.failed #sync-title { color: #ffd0ad; }
+.sync-times { display: flex; flex-wrap: wrap; gap: 6px 14px; font-variant-numeric: tabular-nums; }
+#check { font-variant-numeric: tabular-nums; }
 [hidden] { display: none !important; }
 .forecast-card { background: #172a40; border-radius: 10px; padding: 12px 14px; margin-top: 15px; }
+.forecast-card > summary { color: #ecf4ff; }
+.forecast-card > summary .forecast-line { display: inline-flex; vertical-align: top; max-width: calc(100% - 22px); }
 .forecast-line { display: flex; flex-direction: column; gap: 7px; align-items: flex-start; font-size: 12px; }
 .forecast-line strong { font-size: 26px; font-weight: 600; }
 .forecast-card p { margin: 7px 0 0; }
 .forecast-card details { margin-top: 8px; }
+#forecast-evidence { margin: 12px 0; font-size: 12px; }
+#forecast-evidence > div { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 12px; padding: 8px 0; border-top: 1px solid #2d3c53; }
+#forecast-evidence dt { color: #a7bad4; }
+#forecast-evidence dd { margin: 0; overflow-wrap: anywhere; }
 .fold { margin-top: 16px; border-top: 1px solid #2d3c53; padding-top: 15px; }
 .fold > summary { color: #dce7f4; font-size: 14px; }
 .fold-hint { float: right; color: #91a8c1; font-size: 11px; }
@@ -34,6 +47,7 @@ details { margin-top: 14px; } summary { color: #a7bad4; cursor: pointer; font-si
 #settings-fold label { display: block; margin-top: 14px; }
 #history { border-top: 0; }
 #detail p { margin: 7px 0; line-height: 1.55; font-size: 12px; }
+#detail > .section-heading { margin-top: 12px; }
 #detail #source, #detail #published { font-size: 11px; }
 #account-fold p { font-size: 12px; line-height: 1.55; margin: 8px 0; }
 section { margin-top: 16px; }

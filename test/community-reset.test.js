@@ -46,3 +46,37 @@ test('unread limit changes do not masquerade as resets; a grant does not imply q
     assert.equal(noticePresentation(state, NOW).value, '35%');
     assert.equal(noticePresentation({ ...state, activeNotice: { kind: 'banked', stage: 'completed', verified: true } }, NOW).value, '已发放重置卡');
 });
+
+test('panel distinguishes a community completion report from a verified original announcement', () => {
+    const state = { forecast: { asOf: NOW, healthy: true, percent: 10 }, activeNotice: { id: '12345678901', kind: 'reset', stage: 'completed', verified: false },
+        records: [{ id: 'older', kind: 'reset', stage: 'completed', verified: true }, { id: '12345678901', kind: 'reset', stage: 'announced', verified: true }] };
+    const view = noticePresentation(state, NOW);
+    assert.equal(view.tag, '社区记录重置');
+    assert.equal(view.detailTitle, '社区报告已重置');
+    assert.match(view.explanation, /原帖只确认了预告/);
+    assert.deepEqual(view.evidence, [['社区记录', '报告已执行重置'], ['Tibo 原帖', '明确预告将重置额度']]);
+    assert.match(view.accountNote, /不代表本账户已生效/);
+    state.records[1].stage = 'completed'; state.activeNotice.verified = true;
+    const confirmed = noticePresentation(state, NOW);
+    assert.equal(confirmed.detailTitle, 'Tibo 表示已重置');
+    assert.match(confirmed.evidence[1][1], /已完成重置/);
+});
+
+test('panel names the source and stage for every reset and card announcement', () => {
+    for (const kind of ['reset', 'banked']) for (const stage of ['announced', 'completed']) for (const verified of [false, true]) {
+        const view = noticePresentation({ forecast: { asOf: NOW, healthy: true }, activeNotice: { kind, stage, verified } }, NOW);
+        assert.ok(view.detailTitle.startsWith(verified ? 'Tibo' : '社区'));
+        assert.match(view.detailTitle, stage === 'announced' ? /预告/ : /已/);
+        assert.match(view.evidence[1][1], verified ? /明确/ : /尚未/);
+        assert.equal(view.tag.includes('\n'), false);
+        if (kind === 'banked') assert.match(view.accountNote, /手动使用.*不等于额度恢复/);
+    }
+});
+
+test('forecast and unavailable states explain numbers and the specific data problem', () => {
+    const state = { forecast: { asOf: NOW, healthy: true, percent: 10 } };
+    assert.match(noticePresentation(state, NOW).explanation, /不是你的额度剩余比例/);
+    assert.match(noticePresentation(state, NOW + MAX_AGE + 1).explanation, /超过 6 小时/);
+    assert.match(noticePresentation({ ...state, error: '网络连接失败' }, NOW).explanation, /网络连接失败/);
+    assert.match(noticePresentation({}, NOW).explanation, /尚未取得社区数据/);
+});

@@ -6,20 +6,41 @@
     const titles = { reset: '额度重置公告', banked: '重置卡发放公告', limits: '额度上限调整', hint: '重置相关动态' };
     const stage = r => r.kind === 'hint' ? '相关线索' : r.kind === 'limits' ? '上限调整' : r.stage === 'completed' ? r.kind === 'banked' ? '已发卡' : '已执行' : '已预告';
     const status = r => r.verified ? `${stage(r)} · 原帖已核验` : r.verificationStatus === 'rejected' ? '未确认公告 · 原帖已读取' : '社区收录 · 待核验';
-    let state, selectedId;
+    let state, selectedId, checking = false;
+    function renderCheck() {
+        if (!state) return;
+        const loading = checking || state.loading;
+        const failed = state.failures > 0;
+        const seconds = Math.max(0, Math.ceil((state.manualCheckAt - Date.now()) / 1000));
+        const countdown = seconds >= 60 ? `${Math.floor(seconds / 60)} 分 ${String(seconds % 60).padStart(2, '0')} 秒` : `${seconds} 秒`;
+        $('check').disabled = loading || seconds > 0;
+        $('check').textContent = loading ? '正在检查…' : seconds ? `${countdown}后可${failed ? '重试' : '检查'}` : failed ? '立即重试' : '立即检查';
+        $('sync-status').textContent = loading ? '正在获取最新动态' : failed ? '更新失败' : '';
+        $('sync-status').hidden = !$('sync-status').textContent;
+        $('sync-mode').textContent = state.enabled ? '自动检查开启' : '自动检查已暂停';
+        $('sync-panel').classList.toggle('failed', failed && !loading);
+        $('sync-reason').textContent = loading ? '正在检查社区动态与公告，请稍候。' : failed ? `保留上次读取结果。${seconds ? '短暂等待后可手动重试。' : '现在可以手动重试。'}` : !state.enabled && !seconds ? '后台定时检查已暂停，你仍可手动检查。' : '';
+        $('sync-reason').hidden = !$('sync-reason').textContent;
+        $('sync-last').textContent = `上次成功读取：${time(state.lastSuccessAt)}`;
+        $('sync-next').textContent = state.enabled ? `${failed ? '自动重试' : '下次检查'}：${time(state.nextCheckAt)}` : '自动检查已暂停';
+    }
     function render(next) {
         state = next;
         $('enabled').checked = state.enabled;
         $('show-probability').checked = state.showProbability === true;
-        $('check').disabled = state.loading || !state.enabled;
-        $('check').textContent = state.loading ? '检查中…' : '立即检查';
-        $('checked').textContent = `社区数据：${time(state.forecast?.asOf)}${state.enabled ? '' : ' · 已暂停'}`;
-        $('schedule').textContent = `正常每 10 分钟读取社区接口，失败时逐步延长至 1 小时。${state.enabled ? `下次计划：${time(state.nextCheckAt)}。` : '已暂停自动检查。'}`;
+        renderCheck();
+        $('checked').textContent = `社区数据：${time(state.forecast?.asOf)}`;
+        $('schedule').textContent = `自动每 30 分钟检查一次，手动检查间隔 10 分钟；失败后 30 秒可手动重试，自动重试间隔延长至 1 小时。${state.enabled ? '' : '已暂停自动检查，仍可手动检查。'}`;
         $('error').hidden = !state.error; $('error').textContent = state.error || '';
         const presentation = window.noticePresentation(state);
         $('forecast-heading').textContent = presentation.heading;
-        $('forecast-value').textContent = presentation.value;
-        $('forecast-note').textContent = presentation.note;
+        $('forecast-value').textContent = presentation.detailTitle;
+        $('forecast-note').textContent = presentation.explanation;
+        $('forecast-evidence').replaceChildren(...presentation.evidence.map(([label, text]) => {
+            const row = document.createElement('div'), term = document.createElement('dt'), description = document.createElement('dd');
+            term.textContent = label; description.textContent = text; row.append(term, description); return row;
+        }));
+        $('forecast-account-note').textContent = presentation.accountNote;
         $('forecast-basis-text').textContent = `上游计算时间：${time(state.forecast?.asOf)}。接口最近读取：${time(state.lastSuccessAt)}。`;
         const record = state.records.find(r => r.id === selectedId) || state.records.find(r => r.id === state.activeNotice?.id) || state.records[0];
         selectedId = record?.id;
@@ -35,6 +56,8 @@
         $('original').hidden = !record; $('quote-wrap').hidden = !record;
         $('quote-label').textContent = record?.originalText ? '查看读取到的原帖' : '查看社区收录内容';
         $('quote').textContent = record?.originalText || record?.text || '';
+        $('translation-wrap').hidden = !record?.originalText;
+        $('quote-zh').textContent = record?.chineseText && record.translationOriginalText === record.originalText ? record.chineseText : '中文翻译暂未生成，原文仍可阅读。';
         $('mark-read').hidden = !record?.verified;
         $('mark-read').disabled = record?.read !== false;
         $('mark-read').textContent = record?.read === false ? '标记已读' : '已读';
@@ -52,7 +75,7 @@
             button.setAttribute('aria-pressed', String(r.id === selectedId));
             button.textContent = `${r.verified && !r.read ? '未读 · ' : ''}${status(r)} · ${titles[r.kind] || titles.hint}`;
             const stamp = document.createElement('small'); stamp.textContent = time(r.publishedAt); button.append(stamp);
-            button.addEventListener('click', () => { selectedId = r.id; render(state); }); return button;
+            button.addEventListener('click', () => { selectedId = r.id; $('detail').open = true; render(state); }); return button;
         }));
         $('history-count').textContent = `${state.records.length} 条 · 点击展开`;
         const fresh = state.forecast?.healthy && Date.now() - state.forecast.asOf <= 21600000;
@@ -61,10 +84,11 @@
         $('verification-health').textContent = `当前原帖核验：${!state.verificationEnabled ? '未配置 FIRECRAWL_API_KEY，保留为社区收录' : verification[record?.verificationStatus] || '等待核验'}${record?.nextVerificationAt ? ` · 重试不早于 ${time(record.nextVerificationAt)}` : ''}`;
     }
     $('check').addEventListener('click', async () => {
-        if (state?.lastAttemptAt && Date.now() - state.lastAttemptAt < 600000) {
-            $('error').hidden = false; $('error').textContent = '社区数据每 10 分钟更新，请稍后再检查。'; return;
-        }
+        renderCheck();
+        if (!state || $('check').disabled) return;
+        checking = true; renderCheck();
         try { render(await api.refreshNotices()); } catch { $('error').hidden = false; $('error').textContent = '公告检查失败，请重试。'; }
+        finally { checking = false; renderCheck(); }
     });
     $('enabled').addEventListener('change', async () => { render(await api.enableNotices($('enabled').checked)); });
     $('show-probability').addEventListener('change', async () => { render(await api.showProbability($('show-probability').checked)); });
@@ -81,4 +105,5 @@
     api.subscribeNotices(render);
     api.readNotices().then(render).catch(() => { $('error').hidden = false; $('error').textContent = '无法读取公告记录，请重新打开窗口。'; });
     window.setInterval(() => { if (state) render(state); }, 60000);
+    window.setInterval(renderCheck, 1000);
 })();
