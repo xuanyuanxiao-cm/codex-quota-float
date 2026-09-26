@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppServerClient = void 0;
 exports.resolveAppServerCommand = resolveAppServerCommand;
 const node_child_process_1 = require("node:child_process");
+const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const DEFAULT_COMMAND = 'codex';
@@ -55,6 +56,7 @@ class AppServerClient {
     child;
     nextRequestId = 1;
     pending = new Map();
+    resetAttemptKeys = new Map();
     listeners = new Set();
     inputBuffer = '';
     startPromise;
@@ -114,10 +116,14 @@ class AppServerClient {
         if (!this.initialized || !this.child) {
             return Promise.reject(new Error('AppServerClient is not started'));
         }
-        return this.sendRequest('account/rateLimitResetCredit/consume', { creditId }).then((result) => {
+        const idempotencyKey = this.resetAttemptKeys.get(creditId) ?? (0, node_crypto_1.randomUUID)();
+        // Preserve the key after an uncertain failure so a retry cannot redeem twice.
+        this.resetAttemptKeys.set(creditId, idempotencyKey);
+        return this.sendRequest('account/rateLimitResetCredit/consume', { creditId, idempotencyKey }).then((result) => {
             if (!isRecord(result) || typeof result.outcome !== 'string') {
                 throw new Error('Invalid reset credit response');
             }
+            this.resetAttemptKeys.delete(creditId);
             return result;
         });
     }

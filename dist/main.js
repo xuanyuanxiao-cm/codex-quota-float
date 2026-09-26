@@ -16,9 +16,39 @@ const refresh_controller_1 = require("./refresh-controller");
 const tray_menu_1 = require("./tray-menu");
 const usage_model_1 = require("./usage-model");
 const window_position_1 = require("./window-position");
-function registerQuotaActions(ipcMain, controller) {
+function registerQuotaActions(ipcMain, controller, dialog, getWindow) {
+    let pendingReset;
+    const requestReset = (creditId) => {
+        if (pendingReset)
+            return pendingReset;
+        pendingReset = (async () => {
+            const credits = controller.state.resetCredits?.credits.filter((credit) => credit.status === 'available') ?? [];
+            const index = credits.findIndex((credit) => creditId === undefined || credit.id === creditId);
+            const credit = credits[index];
+            if (!credit)
+                return { outcome: 'noCredit' };
+            const expiry = Number.isFinite(credit.expiresAt)
+                ? `${new Date(credit.expiresAt < 1e11 ? credit.expiresAt * 1000 : credit.expiresAt).toLocaleDateString('zh-CN')} 到期`
+                : '到期时间未知';
+            const { response } = await dialog.showMessageBox(getWindow(), {
+                type: 'question',
+                title: '使用重置卡',
+                message: `确定使用「重置卡 ${index + 1}」重置额度吗？`,
+                detail: `${expiry} · 编号 …${credit.id.slice(-4)}\n成功后将消耗这张卡。`,
+                buttons: ['取消', '确认使用'],
+                defaultId: 0,
+                cancelId: 0,
+                noLink: true,
+            });
+            if (response !== 1)
+                return { outcome: 'cancelled' };
+            return controller.resetQuota(credit.id);
+        })().finally(() => { pendingReset = undefined; });
+        return pendingReset;
+    };
     ipcMain.handle('quota:refresh-now', () => controller.refreshNow());
-    ipcMain.handle('quota:reset', (_event, creditId) => controller.resetQuota(creditId));
+    ipcMain.handle('quota:reset', (_event, creditId) => requestReset(creditId));
+    return requestReset;
 }
 function dockWindowOnRight(window, workArea, requestedY) {
     const position = (0, window_position_1.rightDockPosition)(workArea, window_position_1.NORMAL_WINDOW_SIZE, requestedY);
@@ -119,7 +149,7 @@ function startCompanion(deps = loadElectronDeps()) {
         latestState = state;
         window?.webContents.send('quota:state', state);
     });
-    registerQuotaActions(deps.ipcMain, controller);
+    const requestReset = registerQuotaActions(deps.ipcMain, controller, deps.dialog, () => window);
     deps.app.on('before-quit', stopResources);
     void deps.app.whenReady().then(async () => {
         window = createMainWindow(deps.BrowserWindow);
@@ -225,7 +255,7 @@ function startCompanion(deps = loadElectronDeps()) {
             const menu = (0, tray_menu_1.createOrbMenu)({
                 buildFromTemplate: (items) => deps.Menu.buildFromTemplate(items),
                 onRefresh: () => void controller.refreshNow(),
-                onReset: () => void controller.resetQuota().catch(() => undefined),
+                onReset: () => void requestReset().catch(() => undefined),
                 onHideToEdge: () => setEdgeHidden(true),
                 onMinimizeToTray: () => window?.hide?.(),
                 onQuit: quit,

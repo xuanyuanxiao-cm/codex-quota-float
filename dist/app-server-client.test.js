@@ -126,7 +126,7 @@ async function completeInitialization(client, child) {
         (0, vitest_1.expect)(JSON.parse(child.stdin.writes[2])).toEqual({
             method: 'account/rateLimitResetCredit/consume',
             id: 2,
-            params: { creditId: 'credit-1' },
+            params: { creditId: 'credit-1', idempotencyKey: vitest_1.expect.any(String) },
         });
         child.send({ id: 2, result: { outcome: 'reset' } });
         await (0, vitest_1.expect)(consuming).resolves.toEqual({ outcome: 'reset' });

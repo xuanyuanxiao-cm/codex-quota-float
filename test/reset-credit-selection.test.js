@@ -61,9 +61,10 @@ test('the reset IPC handler forwards the chosen credit ID', async () => {
   const handlers = new Map();
   const received = [];
   registerQuotaActions({ handle: (channel, handler) => handlers.set(channel, handler) }, {
+    state: { resetCredits: credits },
     refreshNow: async () => {},
     resetQuota: async (creditId) => { received.push(creditId); return { outcome: 'reset' }; },
-  });
+  }, { showMessageBox: async () => ({ response: 1 }) }, () => ({}));
   await handlers.get('quota:reset')({}, 'later');
   assert.deepEqual(received, ['later']);
 });

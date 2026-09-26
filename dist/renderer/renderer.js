@@ -265,7 +265,7 @@
         const result = await api.resetQuota(selectedCreditId);
         if (result?.outcome === "reset" || result?.outcome === "alreadyRedeemed") {
           closeCreditPicker();
-        } else {
+        } else if (result?.outcome !== "cancelled") {
           creditError.textContent = "未完成重置，请刷新后重试";
           creditError.hidden = false;
         }

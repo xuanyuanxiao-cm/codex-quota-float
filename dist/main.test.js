@@ -61,9 +61,10 @@ const originalCommand = process.env.CODEX_QUOTA_FLOAT_APP_SERVER_COMMAND;
         (0, main_1.registerQuotaActions)({
             handle: (channel, listener) => handlers.set(channel, listener),
         }, {
+            state: { resetCredits: { credits: [{ id: 'credit-1', status: 'available' }] } },
             refreshNow: vitest_1.vi.fn(() => Promise.resolve()),
             resetQuota,
-        });
+        }, { showMessageBox: async () => ({ response: 1 }) }, () => ({}));
         await (0, vitest_1.expect)(handlers.get('quota:reset')?.()).resolves.toEqual({ outcome: 'reset' });
         (0, vitest_1.expect)(resetQuota).toHaveBeenCalledOnce();
     });

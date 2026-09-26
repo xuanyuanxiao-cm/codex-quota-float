@@ -26,7 +26,7 @@ function element() {
   };
 }
 
-function mount() {
+function mount(outcome = 'reset') {
   const selectors = new Map();
   for (const selector of [
     '[data-action="toggle-pin"]', '[data-details]', '[data-action="refresh"]',
@@ -49,7 +49,7 @@ function mount() {
   const quota = {
     subscribe(listener) { renderState = listener; return () => {}; },
     subscribeEdgeHidden() { return () => {}; },
-    resetQuota: async (creditId) => { calls.push(creditId); return { outcome: 'reset' }; },
+    resetQuota: async (creditId) => { calls.push(creditId); return { outcome }; },
     refreshNow() {}, setEdgeHidden() {}, startDrag() {}, stopDrag() {}, moveToY() {},
   };
   const script = fs.readFileSync(path.join(__dirname, '..', 'dist', 'renderer', 'renderer.js'), 'utf8');
@@ -130,4 +130,15 @@ test('canceling card selection consumes nothing', () => {
   selectors.get('[data-action="cancel-reset"]').click();
   assert.equal(selectors.get('[data-credit-picker]').hidden, true);
   assert.deepEqual(calls, []);
+});
+
+test('canceling the native confirmation keeps the picker open without showing a reset failure', async () => {
+  const { selectors, renderState } = mount('cancelled');
+  renderState(state);
+  selectors.get('[data-action="reset"]').click();
+  selectors.get('[data-action="confirm-reset"]').click();
+  await new Promise(setImmediate);
+  assert.equal(selectors.get('[data-credit-error]').hidden, true);
+  assert.equal(selectors.get('[data-credit-picker]').hidden, false);
+  assert.equal(selectors.get('[data-action="confirm-reset"]').disabled, false);
 });
