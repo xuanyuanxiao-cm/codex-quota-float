@@ -32,7 +32,7 @@ electron_1.contextBridge.exposeInMainWorld('quota', {
     openNotices: () => electron_1.ipcRenderer.invoke('quota:open-notices'),
     readNotices: () => electron_1.ipcRenderer.invoke('quota:read-notices'),
     refreshNotices: () => electron_1.ipcRenderer.invoke('quota:refresh-notices'),
-    markNoticesRead: () => electron_1.ipcRenderer.invoke('quota:read-all-notices'),
+    markNoticeRead: (id) => electron_1.ipcRenderer.invoke('quota:read-notice', id),
     enableNotices: (enabled) => electron_1.ipcRenderer.invoke('quota:enable-notices', enabled),
     showProbability: (show) => electron_1.ipcRenderer.invoke('quota:show-probability', show),
     openNoticeSource: (id) => electron_1.ipcRenderer.invoke('quota:open-notice-source', id),

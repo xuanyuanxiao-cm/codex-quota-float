@@ -377,20 +377,18 @@
       latestNotices = state;
       if (orbNotice) orbNotice.hidden = !state.enabled || !state.unread;
       if (noticeSummary) noticeSummary.textContent = !state.enabled ? "自动检查已关闭" : state.error ? "更新失败 · 点击查看" : state.unread ? `${state.unread} 条新公告 · 账户待确认` : state.loading ? "正在检查公告…" : state.records?.length ? "查看公告与账户状态 ›" : "暂无新动态 ›";
-      const forecast = state.forecast;
-      const age = now() - forecast?.asOf;
-      const available = forecast?.status === "estimated" && age >= 0 && age <= 21600000;
-      const value = state.unread ? "已宣布" : available ? `${forecast.percent}%` : "—";
-      const updated = forecast?.asOf ? new Date(forecast.asOf).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+      const presentation = window.noticePresentation(state, now());
       if (probabilityTag) {
         probabilityTag.hidden = state.showProbability !== true;
-        probabilityTag.textContent = state.unread ? "重置已宣布" : `重置 ${value}`;
-        probabilityTag.title = state.unread ? "有新的已核验公告，点击查看" : available ? `未来 24 小时额外重置公告 · 实验性估计 ${value} · ${updated} 更新` : "未来 24 小时额外重置公告 · 暂无法估计";
+        probabilityTag.textContent = presentation.tag;
+        probabilityTag.title = `${presentation.heading} · ${presentation.note}`;
       }
       const probabilityValue = root.querySelector('[data-probability-value]');
       const probabilityNote = root.querySelector('[data-probability-note]');
-      if (probabilityValue) probabilityValue.textContent = value;
-      if (probabilityNote) probabilityNote.textContent = state.unread ? "新公告已核验 · 点击查看" : available ? `实验性估计 · ${updated} 更新 ›` : "暂无法估计 · 点击查看依据 ›";
+      const probabilityHeading = root.querySelector('[data-probability-heading]');
+      if (probabilityHeading) probabilityHeading.textContent = presentation.heading;
+      if (probabilityValue) probabilityValue.textContent = presentation.value;
+      if (probabilityNote) probabilityNote.textContent = presentation.note;
       syncWindowLayout();
     };
     const unsubscribeNotices = api.subscribeNotices?.(renderNotices);

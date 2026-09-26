@@ -27,6 +27,7 @@ const nativeActions = new Map();
 const dragActions = [];
 startCompanion({
   ...electron,
+  noticeOptions: { loadCommunity: async () => { throw Error('Offline fixture'); } },
   BrowserWindow: class extends BrowserWindow {
     constructor(options) {
       super({ ...options, show: process.argv.includes('--interactive') });

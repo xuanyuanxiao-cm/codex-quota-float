@@ -30,6 +30,7 @@ let shape = [];
 let trayMenu;
 startCompanion({
   ...electron,
+  noticeOptions: { loadCommunity: async () => { throw Error('Offline fixture'); } },
   Notification: class extends EventEmitter {
     static isSupported() { return true; }
     constructor(options) { super(); this.options = options; notifications.push(this); }

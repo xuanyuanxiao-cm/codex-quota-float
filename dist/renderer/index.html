@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Codex Quota</title>
     <link rel="stylesheet" href="styles.css" />
+    <script src="./notice-presentation.js" defer></script>
     <script src="./renderer.js" defer></script>
   </head>
   <body>
@@ -64,7 +65,7 @@
         </section>
         <p class="status-note" data-note hidden></p>
         <p class="last-updated" data-last-updated hidden></p>
-        <button class="probability-panel" data-probability-panel><span>重置概率 · 未来 24h <strong data-probability-value>—</strong></span><small data-probability-note>实验性估计 · 等待数据</small></button>
+        <button class="probability-panel" data-probability-panel><span><span data-probability-heading>社区预测 · 未来 24h</span><strong data-probability-value>—</strong></span><small data-probability-note>等待社区数据</small></button>
         <button class="trends-button" data-action="trends">▥ 用量趋势 ↗</button>
         <button class="notice-button" data-action="notices"><span>≡ 重置动态</span><span data-notice-summary>读取中…</span></button>
       </section>

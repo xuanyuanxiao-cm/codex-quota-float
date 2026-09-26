@@ -3,102 +3,116 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { ResetNotices, parseTimeline, originalPost, postUrl, HOUR, DAY } = require('../dist/notices');
-const { learnSchedule, nextCheckAt, inBusyWindow } = require('../dist/notice-schedule');
+const { ResetNotices, classifyPost, originalPost, HOUR, DAY } = require('../dist/notices');
+const { INTERVAL } = require('../dist/community-reset');
+const { noticePresentation } = require('../dist/renderer/notice-presentation');
+const { url, postText, original, snapshot } = require('./notice-fixtures.cjs');
 const NOW = Date.parse('2026-09-26T06:00:00Z');
-const url = id => `https://x.com/thsottiaux/status/${id}`;
-const text = "We'll reset usage limits for all paid users across Codex.";
-const article = (id, time, body = text) => `<article><time datetime="${new Date(time).toISOString()}"></time><blockquote>${body}</blockquote><a href="${url(id)}">Original</a></article>`;
-const page = articles => '<h1>Tibo desk</h1>' + articles;
-const original = (id, body = text) => `<h1>Post by @thsottiaux</h1><p>Author: Tibo @thsottiaux URL: ${url(id)}</p><h2>Post</h2><p>${body}</p><h2>Thread</h2><p>unrelated</p>`;
 function setup(t) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reset-notices-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-    let now = NOW, content = page(article('12345678901', NOW - HOUR));
+    let now = NOW, items = [{ id: '12345678901', time: NOW - HOUR }], fail = false;
     const notified = [], calls = [];
-    const options = { now: () => now, onNotice: r => notified.push(r.id), scrapePage: async address => {
-        calls.push(address); if (content instanceof Error) throw content;
-        return address.endsWith('/timeline') ? content : original(address.split('/').at(-1));
-    } };
+    const options = { now: () => now, canVerify: () => true, onNotice: r => notified.push(r.id),
+        loadCommunity: async () => { calls.push('community'); if (fail) throw Error('offline'); return snapshot(now, items); },
+        scrapePage: async address => { calls.push(address); return original(address.split('/').at(-1)); } };
     const service = new ResetNotices(path.join(dir, 'notices.json'), options);
     t.after(() => service.stop());
-    return { service, options, notified, calls, advance: time => { now += time; }, content: value => { content = value; } };
+    return { service, options, notified, calls, advance: time => { now += time; }, items: value => { items = value; }, fail: value => { fail = value; }, now: () => now };
 }
-test('first sync is silent, a new verified announcement notifies once, including after restart', async t => {
+test('classifier separates announcements, completion, grants and unrelated explanations', () => {
+    assert.deepEqual(classifyPost(postText), { kind: 'reset', stage: 'announced' });
+    assert.deepEqual(classifyPost('We reset usage limits for Codex yesterday.'), { kind: 'reset', stage: 'completed' });
+    assert.deepEqual(classifyPost("We've added a banked reset for all paid users."), { kind: 'banked', stage: 'completed' });
+    assert.deepEqual(classifyPost("We'll send all paid users a banked reset."), { kind: 'banked', stage: 'announced' });
+    assert.equal(classifyPost('We increased usage limits for Codex.').kind, 'limits');
+    for (const text of ['Banked resets expire after 30 days.', 'We will reset your password if you request it.', 'We will reset usage limits for Codex if the outage lasts.', 'We are not going to reset usage limits for Codex.', 'Will we reset usage limits for Codex?', 'We might send a banked reset to all paid users.']) assert.equal(classifyPost(text).kind, 'hint', text);
+});
+test('first sync is silent; new posts notify once and reading does not change announcement state', async t => {
     const s = setup(t); await s.service.refresh(); assert.deepEqual(s.notified, []);
-    assert.equal(s.service.view().records[0].verified, true);
-    s.advance(HOUR); s.content(page(article('12345678902', NOW + 1000) + article('12345678901', NOW - HOUR)));
-    await s.service.refresh(); assert.deepEqual(s.notified, ['12345678902']); assert.equal(s.service.view().unread, 1);
-    s.advance(HOUR); await s.service.refresh(); assert.equal(s.notified.length, 1);
+    s.advance(INTERVAL); s.items([{ id: '12345678902', time: NOW + 1000 }]); await s.service.refresh();
+    assert.deepEqual(s.notified, ['12345678902']); assert.equal(s.service.view().unread, 1);
+    const before = noticePresentation(s.service.view(), s.now());
+    s.service.markRead('12345678902'); assert.equal(s.service.view().unread, 0);
+    assert.deepEqual(noticePresentation(s.service.view(), s.now()), before);
     const restarted = new ResetNotices(s.service.file, s.options); t.after(() => restarted.stop());
-    await restarted.refresh(); assert.equal(s.notified.length, 1);
-    restarted.markRead(); assert.equal(restarted.view().unread, 0);
+    s.advance(INTERVAL); await restarted.refresh(); assert.equal(s.notified.length, 1);
 });
-test('network failure preserves history and restart respects persisted attempt time', async t => {
-    const s = setup(t); await s.service.refresh(); s.advance(HOUR); s.content(new Error('offline'));
-    await s.service.refresh(); assert.match(s.service.view().error, /更新失败/); assert.equal(s.service.view().records.length, 1);
-    const count = s.calls.length; const restarted = new ResetNotices(s.service.file, s.options); t.after(() => restarted.stop());
-    await restarted.refresh(); assert.equal(s.calls.length, count);
-    restarted.setEnabled(false); s.advance(2 * HOUR); await restarted.refresh(true); assert.equal(s.calls.length, count);
+test('only the selected announcement is marked read', async t => {
+    const s = setup(t); await s.service.refresh(); s.advance(INTERVAL);
+    s.items([{ id: '12345678903', time: NOW + 2000 }, { id: '12345678902', time: NOW + 1000 }]);
+    await s.service.refresh(); assert.equal(s.service.view().unread, 2);
+    s.service.markRead('12345678902'); assert.equal(s.service.view().unread, 1);
+    s.service.markRead(); assert.equal(s.service.view().unread, 1);
 });
-test('unverified originals never become announcements or notify', async t => {
-    const s = setup(t); await s.service.refresh(); s.advance(HOUR);
-    s.content(page(article('12345678902', NOW + 1000)));
-    const load = s.service.scrapePage;
-    s.service.scrapePage = async address => address.endsWith('/timeline') ? load(address) : '<h1>Please log in</h1>';
-    await s.service.refresh(); assert.equal(s.service.view().records[0].verified, false); assert.deepEqual(s.notified, []);
+test('missing verification key does not block community data or claim local verification', async t => {
+    const s = setup(t); s.service.canVerify = () => false; await s.service.refresh();
+    assert.equal(s.service.view().forecast.percent, 35);
+    assert.equal(s.service.view().activeNotice.verified, false);
+    assert.equal(s.calls.length, 1); assert.equal(s.service.view().unread, 0);
+    assert.match(noticePresentation(s.service.view(), s.now()).note, /进展待核实/);
 });
-test('a delayed feed entry is still new after an intervening successful empty poll', async t => {
-    const s = setup(t); await s.service.refresh(); s.advance(HOUR); await s.service.refresh();
-    s.advance(HOUR); s.content(page(article('12345678902', NOW + 1000)));
-    await s.service.refresh(); assert.deepEqual(s.notified, ['12345678902']);
+test('an original contradicting the community classification never becomes an announcement', async t => {
+    const s = setup(t); s.service.scrapePage = async address => original(address.split('/').at(-1), 'Banked resets expire after 30 days.');
+    await s.service.refresh(); assert.equal(s.service.view().activeNotice, null);
+    assert.equal(s.service.view().records[0].verificationStatus, 'rejected');
+    assert.equal(s.service.view().records[0].verified, false); assert.deepEqual(s.notified, []);
 });
-test('unreadable original posts stop retrying after three checks', async t => {
-    const s = setup(t); let originals = 0;
-    const load = s.service.scrapePage;
-    s.service.scrapePage = async address => {
-        if (address.endsWith('/timeline')) return load(address);
-        originals++; throw new Error('blocked');
-    };
-    for (let i = 0; i < 5; i++) { await s.service.refresh(); s.advance(HOUR); }
-    assert.equal(originals, 3); assert.equal(s.service.view().records[0].verified, false);
+test('temporary verification failures retry after backoff without exhausting content attempts', async t => {
+    const s = setup(t); let fail = true, attempts = 0;
+    s.service.scrapePage = async address => { attempts++; if (fail) throw Error('network'); return original(address.split('/').at(-1)); };
+    for (let i = 0; i < 4; i++) { await s.service.refresh(); s.advance(6 * HOUR); }
+    assert.equal(attempts, 4); assert.equal(s.service.view().records[0].verificationAttempts, undefined);
+    fail = false; await s.service.refresh(); assert.equal(s.service.view().records[0].verified, true);
 });
-test('HTML replies, hostile links, unknown layouts and future dates are not trusted', () => {
-    assert.equal(originalPost(`<p>${url('12345678901')}</p><h2>Post</h2><p>hello</p><h2>Thread</h2>${original('12345678901')}`, url('12345678901')), null);
-    assert.equal(postUrl('https://x.com.evil.test/thsottiaux/status/12345678901'), null);
-    assert.equal(postUrl('file:///C:/Windows/test'), null);
-    assert.throws(() => parseTimeline('<h1>Access denied</h1>', NOW));
-    assert.equal(parseTimeline(page(article('12345678901', NOW + DAY)), NOW).length, 0);
-    assert.equal(parseTimeline(page(article('12345678901', NOW - HOUR, 'Codex is down')), NOW).length, 0);
+test('unrecognizable original pages use bounded attempts and exclude replies', async t => {
+    const s = setup(t); let calls = 0; s.service.scrapePage = async () => { calls++; return '<h1>Login</h1>'; };
+    for (let i = 0; i < 5; i++) { await s.service.refresh(); s.advance(6 * HOUR); }
+    assert.equal(calls, 3); assert.equal(s.service.view().records[0].verified, false);
+    assert.equal(originalPost(`<p>${url('12345678901')}</p><h2>Post</h2><p>Hi</p><h2>Thread</h2>${original('12345678901')}`, url('12345678901')), null);
+    assert.equal(originalPost(original('123456789012'), url('12345678901')), null);
 });
-test('retention bounds records, and elapsed time clears old history even without a successful fetch', async t => {
+test('manual checks, restart and concurrent calls respect the ten-minute interval', async t => {
+    const s = setup(t); await Promise.all([s.service.refresh(), s.service.refresh(true)]);
+    const count = s.calls.length; s.advance(60000); await s.service.refresh(true); assert.equal(s.calls.length, count);
+    const restarted = new ResetNotices(s.service.file, s.options); t.after(() => restarted.stop());
+    await restarted.refresh(true); assert.equal(s.calls.length, count);
+    s.service.setEnabled(false); s.advance(HOUR); await s.service.refresh(true); assert.equal(s.calls.length, count);
+});
+test('network failure retains records but suppresses the forecast and backs off', async t => {
+    const s = setup(t); await s.service.refresh(); s.advance(INTERVAL); s.fail(true); await s.service.refresh();
+    assert.equal(s.service.view().records.length, 1);
+    assert.equal(noticePresentation(s.service.view(), s.now()).value, '—');
+    assert.equal(s.service.view().nextCheckAt, s.now() + 2 * INTERVAL);
+    const restarted = new ResetNotices(s.service.file, s.options); t.after(() => restarted.stop());
+    assert.equal(noticePresentation(restarted.view(), s.now()).value, '—', 'restart preserves failure state');
+    s.advance(31 * DAY); assert.equal(s.service.view().records.length, 0);
+});
+test('a locally verified limit adjustment overrides an incorrect community reset classification', async t => {
+    const s = setup(t); s.service.scrapePage = async address => original(address.split('/').at(-1), 'We increased usage limits for Codex.');
+    await s.service.refresh(); assert.equal(s.service.view().records[0].kind, 'limits');
+    assert.equal(s.service.view().activeNotice, null);
+    assert.equal(noticePresentation(s.service.view(), s.now()).value, '35%');
+});
+test('stopping an in-flight collection prevents state and notification changes', async t => {
+    const s = setup(t); let resolve;
+    s.service.loadCommunity = () => new Promise(r => { resolve = r; });
+    const pending = s.service.refresh(); s.service.setEnabled(false); resolve(snapshot(NOW, [{ id: '12345678901', time: NOW - HOUR }]));
+    await pending; assert.equal(s.service.view().records.length, 0); assert.equal(s.service.view().lastSuccessAt, null);
+});
+test('legacy migration preserves preferences and history without trusting old classifications', t => {
+    const s = setup(t); fs.writeFileSync(s.service.file, JSON.stringify({ enabled: false, showProbability: false, records: [{ id: '12345678901', url: url('12345678901'), publishedAt: NOW - HOUR, text: postText, verified: true, kind: 'reset' }] }));
+    const migrated = new ResetNotices(s.service.file, s.options); t.after(() => migrated.stop());
+    assert.equal(migrated.view().enabled, false); assert.equal(migrated.view().showProbability, false);
+    assert.equal(migrated.view().records.length, 1); assert.equal(migrated.view().unread, 0); assert.equal(migrated.view().records[0].verified, false);
+});
+test('card arrival uses new IDs, never first reads, missing readings or stale responses', t => {
     const s = setup(t);
-    s.content(page(Array.from({ length: 250 }, (_, i) => article(String(12345678900 + i), NOW - (i + 1) * 1000)).join('')));
-    await s.service.refresh(); assert.equal(s.service.view().records.length, 200);
-    s.advance(31 * DAY); s.content(new Error('offline')); await s.service.refresh(); assert.equal(s.service.view().records.length, 0);
-});
-test('first, stale and missing quota readings never invent a recovery', t => {
-    const s = setup(t);
-    const state = remaining => ({ status: 'ready', fiveHour: { remainingPercent: remaining }, weekly: { remainingPercent: 0 }, lastUpdatedAt: NOW });
-    s.service.updateAccount(state(100)); assert.deepEqual(s.service.view().recoveries, {});
-    s.service.updateAccount(state(0)); s.service.updateAccount({ ...state(100), status: 'error' });
-    assert.deepEqual(s.service.view().recoveries, {}); assert.equal(s.service.view().account.stale, true);
-    s.service.updateAccount(state(null)); s.service.updateAccount(state(100)); assert.deepEqual(s.service.view().recoveries, {});
-    s.service.updateAccount(state(0)); s.service.updateAccount(state(60)); assert.equal(s.service.view().recoveries.fiveHour.remaining, 60);
-    assert.equal(s.service.view().account.weekly, 0);
-});
-test('small or diffuse samples fall back to hourly, concentrated history selects a four-hour window', () => {
-    assert.equal(learnSchedule([{ kind: 'reset', publishedAt: NOW - DAY }], NOW).mode, 'hourly');
-    const records = Array.from({ length: 20 }, (_, i) => ({ kind: 'reset', publishedAt: Date.parse('2026-09-01T19:00:00Z') + i * DAY }));
-    const policy = learnSchedule(records, NOW); assert.equal(policy.mode, 'adaptive'); assert.equal(policy.samples, 20);
-    assert.equal(inBusyWindow(policy, Date.parse('2026-09-25T19:00:00Z')), true);
-    const quiet = Date.parse('2026-09-25T06:00:00Z'); assert.equal(nextCheckAt(policy, quiet, quiet), quiet + 2 * HOUR);
-    const busy = Date.parse('2026-09-25T19:00:00Z'); assert.equal(nextCheckAt(policy, busy, busy), busy + HOUR / 2);
-});
-test('adaptive scheduling wakes at busy-window boundary and works across midnight', () => {
-    const policy = { mode: 'adaptive', startHourUTC: 22 };
-    const before = Date.parse('2026-09-25T21:30:00Z');
-    assert.equal(nextCheckAt(policy, before, before), Date.parse('2026-09-25T22:00:00Z'));
-    assert.equal(inBusyWindow(policy, Date.parse('2026-09-26T01:59:00Z')), true);
-    assert.equal(inBusyWindow(policy, Date.parse('2026-09-26T02:00:00Z')), false);
+    const state = (ids, remaining = 20) => ({ status: 'ready', planType: 'pro', fiveHour: { remainingPercent: remaining }, weekly: { remainingPercent: 50 }, lastUpdatedAt: NOW,
+        resetCredits: ids ? { credits: ids.map(id => ({ id, status: 'available', expiresAt: (NOW + DAY) / 1000 })) } : null });
+    s.service.updateAccount(state(['a'])); assert.equal(s.service.view().cardArrival, null);
+    s.service.updateAccount({ ...state(['a', 'b']), status: 'error' }); assert.equal(s.service.view().cardArrival, null);
+    s.service.updateAccount(state(null)); s.service.updateAccount(state(['a', 'b'])); assert.equal(s.service.view().cardArrival, null);
+    s.service.updateAccount(state(['b', 'c'])); assert.equal(s.service.view().cardArrival.count, 1);
+    assert.equal(s.service.view().account.fiveHour, 20); assert.deepEqual(s.service.view().recoveries, {});
 });

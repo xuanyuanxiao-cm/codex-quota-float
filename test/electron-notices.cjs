@@ -8,15 +8,17 @@ const { app, BrowserWindow, ipcMain } = electron;
 const { AppServerClient } = require('../dist/app-server-client');
 const { startCompanion } = require('../dist/main');
 const { HOUR } = require('../dist/notices');
+const { snapshot, original } = require('./notice-fixtures.cjs');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-notices-ui-'));
 app.setPath('userData', dir);
 let now = Date.now() - HOUR;
 const originalTime = now - HOUR;
 let items = [{ id: '12345678901', time: originalTime }, ...Array.from({ length: 15 }, (_, i) => ({ id: String(12345678000 + i), time: now - (i + 1) * 48 * HOUR }))];
-const postText = "We'll reset usage limits for all paid users across Codex.";
 const url = id => `https://x.com/thsottiaux/status/${id}`;
 let remaining = 19;
 let weeklyOnly = false;
+let credits = ['test-card'];
+let communityStale = false;
 AppServerClient.prototype.start = async () => {};
 AppServerClient.prototype.stop = async () => {};
 AppServerClient.prototype.onRateLimitsUpdated = () => () => {};
@@ -24,14 +26,15 @@ AppServerClient.prototype.readRateLimits = async () => ({ rateLimits: {
     planType: weeklyOnly ? 'pro' : 'plus',
     primary: weeklyOnly ? null : { usedPercent: 100 - remaining, windowDurationMins: 300, resetsAt: (now + HOUR) / 1000 },
     secondary: { usedPercent: 32, windowDurationMins: 10080, resetsAt: (now + 3 * 24 * HOUR) / 1000 },
-}, rateLimitResetCredits: { availableCount: 1, credits: [{ id: 'test-card', status: 'available', expiresAt: (now + 18 * HOUR) / 1000 }] } });
+}, rateLimitResetCredits: { availableCount: credits.length, credits: credits.map(id => ({ id, status: 'available', expiresAt: (now + 18 * HOUR) / 1000 })) } });
 AppServerClient.prototype.consumeRateLimitResetCredit = async () => { throw new Error('Must never consume a card'); };
 const windows = [], notifications = [], handlers = new Map(), opened = [];
 let shape;
 startCompanion({ ...electron,
-    noticeOptions: { now: () => now, scrapePage: async address => address.endsWith('/timeline') ?
-        '<h1>Tibo desk</h1>' + items.map(r => `<article><time datetime="${new Date(r.time).toISOString()}"></time><blockquote>${postText}</blockquote><a href="${url(r.id)}">Original</a></article>`).join('') :
-        `<p>Author: Tibo @thsottiaux URL: ${address}</p><h2>Post</h2><p>${postText}</p><h2>Thread</h2>` },
+    noticeOptions: { now: () => now, canVerify: () => true, loadCommunity: async () => {
+        const data = snapshot(Math.min(now, Date.now()), items);
+        data.dataHealth.stale = communityStale; return data;
+    }, scrapePage: async address => original(address.split('/').at(-1)) },
     BrowserWindow: class extends BrowserWindow {
         constructor(options) { super({ ...options, show: false }); windows.push(this); }
         setShape(value) { shape = value; super.setShape(value); }
@@ -75,19 +78,25 @@ async function capture(win, name) {
     await capture(windows[0], 'expanded');
     await evaluate(windows[0], 'document.querySelector("[data-action=notices]").click()');
     await until(() => windows.length === 2 && !windows[1].webContents.isLoading());
-    await until(() => evaluate(windows[1], 'document.getElementById("status").textContent.includes("已宣布")'));
+    await until(() => evaluate(windows[1], 'document.getElementById("status").textContent.includes("已预告")'));
     const folds = () => evaluate(windows[1], `['account-fold','history-fold'].map(id => document.getElementById(id).open)`);
-    assert.deepEqual(await folds(), [false, false], 'account and history start collapsed');
+    assert.deepEqual(await folds(), [true, false], 'account is visible; history starts collapsed');
     await evaluate(windows[1], `['account-fold','history-fold'].forEach(id => document.getElementById(id).querySelector('summary').click())`);
     await handlers.get('quota:refresh-now')();
-    assert.deepEqual(await folds(), [true, true], 'updates preserve manual expansion');
+    assert.deepEqual(await folds(), [false, true], 'updates preserve manual expansion');
     await evaluate(windows[1], `['account-fold','history-fold'].forEach(id => document.getElementById(id).querySelector('summary').click())`);
     await evaluate(windows[1], 'document.getElementById("original").click()');
     await until(() => opened.length === 1); assert.equal(opened[0], url('12345678902'));
     await handlers.get('quota:open-notice-source')(null, 'https://evil.test'); assert.equal(opened.length, 1);
-    await handlers.get('quota:read-all-notices')();
+    await evaluate(windows[1], 'document.getElementById("mark-read").click()');
     await until(() => evaluate(windows[0], 'document.querySelector("[data-orb-notice]").hidden'));
-    await until(() => evaluate(windows[1], '/^\\d+%$/.test(document.getElementById("forecast-value").textContent)'));
+    assert.equal(await evaluate(windows[1], 'document.getElementById("forecast-value").textContent'), '已有重置预告', 'reading does not erase the announcement');
+    now += HOUR; items.unshift({ id: '12345678903', time: now - 1000 });
+    await handlers.get('quota:refresh-notices')();
+    await until(() => evaluate(windows[1], '!document.getElementById("new-notice").hidden'));
+    assert.equal(handlers.get('quota:read-notices')().unread, 1, 'viewing an older record leaves the new one unread');
+    await evaluate(windows[1], 'document.getElementById("new-notice").click(); document.getElementById("mark-read").click()');
+    await until(() => handlers.get('quota:read-notices')().unread === 0);
     await evaluate(windows[1], 'document.getElementById("show-probability").click()');
     await until(() => evaluate(windows[0], 'document.querySelector("[data-probability-tag]").hidden'));
     assert.equal(handlers.get('quota:read-notices')().showProbability, false);
@@ -99,10 +108,16 @@ async function capture(win, name) {
     remaining = 100; await handlers.get('quota:refresh-now')();
     await until(() => evaluate(windows[1], 'document.getElementById("account-status").classList.contains("recovered") && document.getElementById("account-values").textContent.includes("100%")'));
     assert.equal(await evaluate(windows[1], 'document.body.scrollWidth > innerWidth'), false);
-    assert.deepEqual(await folds(), [false, false], 'updates never auto-expand either section');
-    assert.equal(await evaluate(windows[1], 'document.documentElement.scrollHeight > innerHeight'), false, 'default detail fits without scrolling');
+    assert.deepEqual(await folds(), [true, false], 'updates preserve both sections');
     await capture(windows[0], 'expanded');
     await capture(windows[1], 'detail');
+    credits.push('new-card'); await handlers.get('quota:refresh-now')();
+    await until(() => evaluate(windows[1], 'document.getElementById("account-status").textContent.includes("新增 1 张")'));
+    assert.match(await evaluate(windows[1], 'document.getElementById("account-values").textContent'), /重置卡 2/);
+    communityStale = true; now += HOUR; await handlers.get('quota:refresh-notices')();
+    await until(() => evaluate(windows[1], 'document.getElementById("forecast-value").textContent === "—"'));
+    assert.match(await evaluate(windows[1], 'document.getElementById("forecast-note").textContent'), /暂停/);
+    await capture(windows[1], 'stale');
     weeklyOnly = true;
     await handlers.get('quota:refresh-now')();
     await until(() => evaluate(windows[1], '!document.getElementById("account-values").textContent.includes("5 Hours")'));
@@ -112,6 +127,6 @@ async function capture(win, name) {
     await evaluate(windows[1], 'document.getElementById("enabled").click()');
     await until(() => !handlers.get('quota:read-notices')().enabled);
     assert.equal(await evaluate(windows[1], 'document.getElementById("check").disabled'), true);
-    console.log(JSON.stringify({ noticesUI: 'passed', announcements: 1, collapsedSections: 2, probability: handlers.get('quota:read-notices')().forecast.percent, originalLinks: opened.length, cardConsumption: 0 }));
+    console.log(JSON.stringify({ noticesUI: 'passed', announcements: 2, unreadIsolation: true, staleForecastHidden: true, cardArrival: true, originalLinks: opened.length, cardConsumption: 0 }));
     app.quit();
 })().catch(error => { console.error(error); app.exit(1); });

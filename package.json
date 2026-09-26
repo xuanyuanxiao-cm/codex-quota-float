@@ -1,6 +1,6 @@
 {
   "name": "codex-quota-float-companion",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Compact floating Codex quota companion",
   "private": true,
   "main": "dist/main.js",

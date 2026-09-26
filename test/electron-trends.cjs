@@ -25,6 +25,7 @@ const handlers = new Map();
 const errors = [];
 startCompanion({
   ...electron,
+  noticeOptions: { loadCommunity: async () => { throw Error('Offline fixture'); } },
   Notification: undefined,
   BrowserWindow: class extends BrowserWindow {
     constructor(options) {

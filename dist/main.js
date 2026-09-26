@@ -19,7 +19,8 @@ const window_position_1 = require("./window-position");
 const { QuotaAlerts } = require('./alerts');
 const { UsageHistory } = require('./history');
 const { CodexAutoStart } = require('./auto-start');
-const { ResetNotices, postUrl } = require('./notices');
+const { ResetNotices, postUrl, scrape } = require('./notices');
+const { fetchCommunity } = require('./community-reset');
 function registerQuotaActions(ipcMain, controller, dialog, getWindow) {
     let pendingReset;
     const requestReset = (creditId) => {
@@ -239,6 +240,8 @@ function startCompanion(deps = loadElectronDeps()) {
             void noticesWindow.loadFile(node_path_1.default.join(__dirname, 'renderer', 'notices.html'));
         };
         notices = new ResetNotices(node_path_1.default.join(deps.app.getPath('userData'), 'codex-reset-notices.json'), {
+            loadCommunity: options => fetchCommunity({ ...options, fetchImpl: deps.net?.fetch.bind(deps.net) || fetch }),
+            scrapePage: (url, options) => scrape(url, { ...options, fetchImpl: deps.net?.fetch.bind(deps.net) || fetch }),
             ...deps.noticeOptions,
             onChange: (state) => {
                 sendToWindow(window, 'quota:notices', state);
@@ -260,7 +263,7 @@ function startCompanion(deps = loadElectronDeps()) {
         deps.ipcMain.handle('quota:open-notices', showNotices);
         deps.ipcMain.handle('quota:read-notices', () => notices.view());
         deps.ipcMain.handle('quota:refresh-notices', () => notices.refresh(true));
-        deps.ipcMain.handle('quota:read-all-notices', () => notices.markRead());
+        deps.ipcMain.handle('quota:read-notice', (_event, id) => notices.markRead(id));
         deps.ipcMain.handle('quota:show-probability', (_event, show) => {
             if (typeof show === 'boolean') return notices.setShowProbability(show);
         });
