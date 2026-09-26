@@ -16,6 +16,10 @@ const refresh_controller_1 = require("./refresh-controller");
 const tray_menu_1 = require("./tray-menu");
 const usage_model_1 = require("./usage-model");
 const window_position_1 = require("./window-position");
+const { QuotaAlerts } = require('./alerts');
+const { UsageHistory } = require('./history');
+const { CodexAutoStart } = require('./auto-start');
+const { ResetNotices, postUrl } = require('./notices');
 function registerQuotaActions(ipcMain, controller, dialog, getWindow) {
     let pendingReset;
     const requestReset = (creditId) => {
@@ -84,6 +88,7 @@ function createMainWindow(BrowserWindow, preloadPath = node_path_1.default.join(
         height: window_position_1.COLLAPSED_WINDOW_SIZE.height,
         icon: iconPath,
         transparent: true,
+        backgroundColor: '#00000000',
         frame: false,
         alwaysOnTop: true,
         resizable: false,
@@ -126,7 +131,18 @@ function startCompanion(deps = loadElectronDeps()) {
     let resourcesStopped = false;
     let dragTimer;
     let windowLayout = 'collapsed';
+    let contentHeight = window_position_1.COLLAPSED_WINDOW_SIZE.height;
+    let regions = [{ x: 12, y: 12, width: 76, height: 76, radius: 38 }];
     let normalDockY;
+    let alerts;
+    let openNotification;
+    let history;
+    let trendsWindow;
+    let notices;
+    let noticesWindow;
+    let autoStart;
+    let changingAutoStart = false;
+    const notifications = new Set();
     const stopResources = () => {
         if (resourcesStopped)
             return;
@@ -134,6 +150,9 @@ function startCompanion(deps = loadElectronDeps()) {
         tray?.destroy();
         tray = undefined;
         controller.stop();
+        notices?.stop();
+        for (const notification of notifications) notification.close?.();
+        notifications.clear();
         if (dragTimer)
             clearInterval(dragTimer);
         void client.stop();
@@ -146,30 +165,129 @@ function startCompanion(deps = loadElectronDeps()) {
     };
     controller.subscribe((state) => {
         refreshing = state.status === 'loading';
-        latestState = state;
-        window?.webContents.send('quota:state', state);
+        const result = alerts?.update(state);
+        if (history?.record(state)) trendsWindow?.webContents.send('quota:history-updated');
+        latestState = result ? { ...state, alerts: result.alerts } : state;
+        notices?.updateAccount(state);
+        window?.webContents.send('quota:state', latestState);
+        if (deps.Notification?.isSupported()) {
+            for (const message of result?.notifications ?? []) {
+                try {
+                    const notification = new deps.Notification({
+                        title: message.title, body: message.body, silent: true,
+                        icon: node_path_1.default.join(__dirname, '..', 'assets', `alert-${message.kind}.png`),
+                    });
+                    notifications.add(notification);
+                    notification.on('click', () => openNotification?.(message.target));
+                    notification.on('close', () => notifications.delete(notification));
+                    notification.on('failed', () => notifications.delete(notification));
+                    notification.show();
+                }
+                catch {
+                    // Windows notifications are optional; keep quota updates working.
+                }
+            }
+        }
     });
     const requestReset = registerQuotaActions(deps.ipcMain, controller, deps.dialog, () => window);
     deps.app.on('before-quit', stopResources);
     void deps.app.whenReady().then(async () => {
+        history = new UsageHistory(node_path_1.default.join(deps.app.getPath('userData'), 'codex-quota-history.json'));
+        const showTrends = () => {
+            if (trendsWindow && !trendsWindow.isDestroyed()) {
+                if (trendsWindow.isMinimized()) trendsWindow.restore();
+                trendsWindow.show(); trendsWindow.focus(); return;
+            }
+            trendsWindow = new deps.BrowserWindow({
+                width: 940, height: 720, minWidth: 680, minHeight: 560,
+                title: '用量趋势 · Codex Quota Float', backgroundColor: '#101b30', autoHideMenuBar: true,
+                icon: node_path_1.default.join(__dirname, '..', 'assets', 'codex-quota-float.ico'),
+                webPreferences: { preload: node_path_1.default.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+            });
+            trendsWindow.on('closed', () => { trendsWindow = undefined; });
+            void trendsWindow.loadFile(node_path_1.default.join(__dirname, 'renderer', 'trends.html'));
+        };
+        deps.ipcMain.handle('quota:open-trends', showTrends);
+        deps.ipcMain.handle('quota:read-history', () => history.read());
+        const alertsPath = node_path_1.default.join(deps.app.getPath('userData'), 'codex-quota-float-alerts.json');
+        let savedAlerts = {};
+        try { savedAlerts = JSON.parse((0, node_fs_1.readFileSync)(alertsPath, 'utf8')) ?? {}; } catch {}
+        alerts = new QuotaAlerts(savedAlerts, (saved) => {
+            try { (0, node_fs_1.writeFileSync)(alertsPath, JSON.stringify(saved), 'utf8'); } catch {}
+        });
+        const showNotices = () => {
+            if (noticesWindow && !noticesWindow.isDestroyed()) {
+                if (noticesWindow.isMinimized()) noticesWindow.restore();
+                noticesWindow.show(); noticesWindow.focus(); return;
+            }
+            noticesWindow = new deps.BrowserWindow({
+                width: 470, height: 720, minWidth: 380, minHeight: 440,
+                title: '重置动态 · Codex Quota Float', backgroundColor: '#101b30', autoHideMenuBar: true,
+                icon: node_path_1.default.join(__dirname, '..', 'assets', 'codex-quota-float.ico'),
+                webPreferences: { preload: node_path_1.default.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+            });
+            noticesWindow.on('closed', () => { noticesWindow = undefined; });
+            void noticesWindow.loadFile(node_path_1.default.join(__dirname, 'renderer', 'notices.html'));
+        };
+        notices = new ResetNotices(node_path_1.default.join(deps.app.getPath('userData'), 'codex-reset-notices.json'), {
+            ...deps.noticeOptions,
+            onChange: (state) => {
+                window?.webContents.send('quota:notices', state);
+                noticesWindow?.webContents.send('quota:notices', state);
+            },
+            onNotice: (record) => {
+                if (!alerts.saved.enabled || !deps.Notification?.isSupported()) return;
+                try {
+                    const label = record.kind === 'banked' ? '重置卡' : record.kind === 'limits' ? '额度上限调整' : '额度重置';
+                    const notification = new deps.Notification({ title: `收到${label}公告`, body: 'Tibo 原帖已核验，账户生效情况待确认。点击查看。', silent: true });
+                    notifications.add(notification);
+                    notification.on('click', showNotices);
+                    notification.on('close', () => notifications.delete(notification));
+                    notification.on('failed', () => notifications.delete(notification));
+                    notification.show();
+                } catch { /* The in-app unread badge still works without desktop notifications. */ }
+            },
+        });
+        deps.ipcMain.handle('quota:open-notices', showNotices);
+        deps.ipcMain.handle('quota:read-notices', () => notices.view());
+        deps.ipcMain.handle('quota:refresh-notices', () => notices.refresh(true));
+        deps.ipcMain.handle('quota:read-all-notices', () => notices.markRead());
+        deps.ipcMain.handle('quota:show-probability', (_event, show) => {
+            if (typeof show === 'boolean') return notices.setShowProbability(show);
+        });
+        deps.ipcMain.handle('quota:enable-notices', (_event, enabled) => {
+            if (typeof enabled === 'boolean') return notices.setEnabled(enabled);
+        });
+        deps.ipcMain.handle('quota:open-notice-source', (_event, id) => {
+            const record = notices.saved.records.find(r => r.id === id);
+            if (record && postUrl(record.url)) return deps.shell?.openExternal(record.url);
+        });
+        // Unit tests use minimal Electron doubles; start networking only in a real runtime.
+        if (deps.app.isPackaged !== undefined) notices.start();
         window = createMainWindow(deps.BrowserWindow);
+        window.webContents.on?.('did-finish-load', () => {
+            if (latestState) window.webContents.send('quota:state', latestState);
+        });
         window.setMovable(false);
         const workAreaFor = (bounds) => deps.screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea;
         const dockPath = savedDockPath(deps.app.getPath('userData'));
         const initialBounds = (0, window_position_1.rightDockBounds)(workAreaFor(window.getBounds()), 'normal', readSavedDockY(dockPath));
         normalDockY = initialBounds.y;
-        window.setBounds((0, window_position_1.rightDockBounds)(workAreaFor(window.getBounds()), windowLayout, normalDockY));
+        const applyLayout = (workArea = workAreaFor(window.getBounds())) => {
+            const bounds = (0, window_position_1.rightDockBounds)(workArea, windowLayout, normalDockY, contentHeight);
+            if (windowLayout === 'normal' || windowLayout === 'picker')
+                normalDockY = bounds.y;
+            window.setBounds(bounds);
+            window.setShape((0, window_position_1.createWindowShape)(regions));
+        };
+        applyLayout();
         const moveDockedWindow = (workArea, screenY, pointerOffsetY) => {
             if (!window)
                 return;
             const requestedNormalY = screenY - pointerOffsetY - (windowLayout === 'collapsed' ? 8 : 0);
-            if (windowLayout === 'normal') {
-                normalDockY = dockWindowOnRight(window, workArea, requestedNormalY).y;
-            }
-            else {
-                normalDockY = (0, window_position_1.rightDockPosition)(workArea, window_position_1.NORMAL_WINDOW_SIZE, requestedNormalY).y;
-                window.setBounds((0, window_position_1.rightDockBounds)(workArea, windowLayout, normalDockY));
-            }
+            const bounds = (0, window_position_1.rightDockBounds)(workArea, windowLayout, requestedNormalY, contentHeight);
+            normalDockY = bounds.y - (windowLayout === 'collapsed' ? 8 : 0);
+            applyLayout(workArea);
             saveDockY(dockPath, normalDockY);
         };
         const setEdgeHidden = (hidden) => {
@@ -179,21 +297,33 @@ function startCompanion(deps = loadElectronDeps()) {
                 clearInterval(dragTimer);
             dragTimer = undefined;
             windowLayout = hidden ? 'edgeHidden' : 'collapsed';
-            const bounds = (0, window_position_1.rightDockBounds)(workAreaFor(window.getBounds()), windowLayout, normalDockY);
-            window.setBounds(bounds);
+            contentHeight = window_position_1.COLLAPSED_WINDOW_SIZE.height;
+            regions = hidden ? [{ x: 0, y: 0, width: 14, height: 56, radius: 0 }] : [{ x: 12, y: 12, width: 76, height: 76, radius: 38 }];
+            applyLayout();
             window.webContents.send('quota:edge-hidden', hidden);
+        };
+        openNotification = (target) => {
+            setEdgeHidden(false);
+            window?.show?.();
+            window?.focus?.();
+            window?.webContents.send('quota:open-details', target);
         };
         deps.ipcMain.handle('quota:set-edge-hidden', (...args) => {
             const hidden = args[1];
             if (typeof hidden === 'boolean')
                 setEdgeHidden(hidden);
         });
-        deps.ipcMain.handle('quota:set-expanded', (...args) => {
-            const expanded = args[1];
-            if (!window || windowLayout === 'edgeHidden' || typeof expanded !== 'boolean')
+        deps.ipcMain.handle('quota:set-layout', (_event, layout) => {
+            if (!window || !layout || !['collapsed', 'normal', 'picker'].includes(layout.mode) || windowLayout === 'edgeHidden')
                 return;
-            windowLayout = expanded ? 'normal' : 'collapsed';
-            window.setBounds((0, window_position_1.rightDockBounds)(workAreaFor(window.getBounds()), windowLayout, normalDockY));
+            if (!Number.isFinite(layout.height) || layout.height < 100 || layout.height > 1000 || !Array.isArray(layout.regions) || layout.regions.length < 1 || layout.regions.length > 7)
+                return;
+            if (!layout.regions.every((rect) => rect && ['x', 'y', 'width', 'height', 'radius'].every((key) => Number.isFinite(rect[key]) && rect[key] >= 0) && rect.width > 0 && rect.height > 0 && rect.x + rect.width <= 286 && rect.y + rect.height <= layout.height))
+                return;
+            windowLayout = layout.mode;
+            contentHeight = Math.ceil(layout.height);
+            regions = layout.regions;
+            applyLayout();
         });
         deps.ipcMain.handle('quota:move-to-y', (...args) => {
             const screenY = args[1];
@@ -228,10 +358,10 @@ function startCompanion(deps = loadElectronDeps()) {
                 return;
             event?.preventDefault?.();
             const workArea = workAreaFor(newBounds);
-            const requestedNormalY = windowLayout === 'normal' ? newBounds.y : windowLayout === 'collapsed' ? newBounds.y - 8 : normalDockY;
-            normalDockY = (0, window_position_1.rightDockPosition)(workArea, window_position_1.NORMAL_WINDOW_SIZE, requestedNormalY).y;
-            const bounds = (0, window_position_1.rightDockBounds)(workArea, windowLayout, normalDockY);
-            window.setBounds(bounds);
+            const requestedNormalY = windowLayout === 'normal' || windowLayout === 'picker' ? newBounds.y : windowLayout === 'collapsed' ? newBounds.y - 8 : normalDockY;
+            const bounds = (0, window_position_1.rightDockBounds)(workArea, windowLayout, requestedNormalY, contentHeight);
+            normalDockY = bounds.y - (windowLayout === 'collapsed' ? 8 : windowLayout === 'edgeHidden' ? 30 : 0);
+            applyLayout(workArea);
             if (windowLayout !== 'edgeHidden')
                 saveDockY(dockPath, normalDockY);
         });
@@ -239,7 +369,7 @@ function startCompanion(deps = loadElectronDeps()) {
             const bounds = window?.getBounds();
             if (!bounds || !window)
                 return;
-            const expected = (0, window_position_1.rightDockBounds)(workAreaFor(bounds), windowLayout, normalDockY);
+            const expected = (0, window_position_1.rightDockBounds)(workAreaFor(bounds), windowLayout, normalDockY, contentHeight);
             if (bounds.x !== expected.x ||
                 bounds.y !== expected.y ||
                 bounds.width !== expected.width ||
@@ -261,13 +391,19 @@ function startCompanion(deps = loadElectronDeps()) {
                 onQuit: quit,
                 isRefreshing: () => refreshing,
                 canReset: () => (latestState?.resetCredits?.availableCount ?? 0) > 0 && latestState?.isResetting === false,
+                notificationsEnabled: alerts.saved.enabled,
+                onToggleNotifications: () => { alerts.setEnabled(!alerts.saved.enabled); updateTrayMenu(); },
+                onTrends: showTrends,
+                autoStartEnabled: autoStart?.enabled === true,
+                autoStartAvailable: !!autoStart && !changingAutoStart,
+                onToggleAutoStart: () => void toggleAutoStart(),
             });
             menu.popup?.({ window });
         });
         tray = new deps.Tray(deps.nativeImage?.createFromPath?.(node_path_1.default.join(__dirname, '..', 'assets', 'codex-quota-float.png')) ??
             deps.nativeImage?.createFromDataURL?.('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=') ?? node_path_1.default.join(__dirname, 'renderer', 'index.html'));
         tray.setToolTip?.('Codex Quota Float');
-        tray.setContextMenu((0, tray_menu_1.createTrayMenu)({
+        const updateTrayMenu = () => tray.setContextMenu((0, tray_menu_1.createTrayMenu)({
             buildFromTemplate: (items) => deps.Menu.buildFromTemplate(items),
             onShow: () => {
                 setEdgeHidden(false);
@@ -275,9 +411,29 @@ function startCompanion(deps = loadElectronDeps()) {
                 window?.focus?.();
             },
             onQuit: quit,
+            notificationsEnabled: alerts.saved.enabled,
+            onToggleNotifications: () => { alerts.setEnabled(!alerts.saved.enabled); updateTrayMenu(); },
+            onTrends: showTrends,
+            autoStartEnabled: autoStart?.enabled === true,
+            autoStartAvailable: !!autoStart && !changingAutoStart,
+            onToggleAutoStart: () => void toggleAutoStart(),
         }));
+        const toggleAutoStart = async () => {
+            if (!autoStart || changingAutoStart) return;
+            changingAutoStart = true; updateTrayMenu();
+            try { await autoStart.setEnabled(!autoStart.enabled); }
+            catch { await deps.dialog.showMessageBox(window, { type: 'error', message: '未能设置随 Codex 启动', detail: '请确认用户启动文件夹可写，然后重试。' }); }
+            finally { changingAutoStart = false; updateTrayMenu(); }
+        };
+        if (deps.app.isPackaged && process.platform === 'win32') {
+            autoStart = new CodexAutoStart(deps.app.getPath('userData'), node_path_1.default.join(deps.app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'), process.env.PORTABLE_EXECUTABLE_FILE || process.execPath);
+            if (!autoStart.configured || autoStart.enabled) {
+                changingAutoStart = true;
+                void autoStart.setEnabled(true).catch(() => deps.dialog.showMessageBox(window, { type: 'warning', message: '自动跟随 Codex 未能启用', detail: '可稍后在右键菜单中重新开启。' })).finally(() => { changingAutoStart = false; if (!resourcesStopped) updateTrayMenu(); });
+            }
+        }
+        updateTrayMenu();
         try {
-            await client.start();
             await controller.start();
         }
         catch {
@@ -288,5 +444,13 @@ function startCompanion(deps = loadElectronDeps()) {
     });
 }
 if (require.main === module) {
-    startCompanion();
+    const electron = loadElectronDeps();
+    if (!electron.app.requestSingleInstanceLock()) electron.app.quit();
+    else {
+        electron.app.on('second-instance', () => {
+            const existing = electron.BrowserWindow.getAllWindows()[0];
+            existing?.show(); existing?.focus();
+        });
+        startCompanion(electron);
+    }
 }

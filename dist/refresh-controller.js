@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RefreshController = void 0;
 const usage_model_1 = require("./usage-model");
+const { nextRefreshDelay } = require("./alerts");
 const EMPTY_VIEWS = (0, usage_model_1.normalizeRateLimits)({});
 const DEFAULT_INTERVAL_MS = 300_000;
 const DEFAULT_RETRY_DELAYS_MS = [2_000, 5_000];
@@ -13,6 +14,7 @@ function cloneWindow(window) {
 }
 function cloneSnapshot(snapshot) {
     return {
+        planType: snapshot.planType ?? null,
         ...(snapshot.primary !== undefined ? { primary: cloneWindow(snapshot.primary) } : {}),
         ...(snapshot.secondary !== undefined ? { secondary: cloneWindow(snapshot.secondary) } : {}),
     };
@@ -38,8 +40,16 @@ function mergeWindow(current, update) {
 }
 function mergeSnapshot(current, update) {
     return {
+        planType: update.planType === undefined ? current.planType : update.planType,
         primary: mergeWindow(current.primary, update.primary),
         secondary: mergeWindow(current.secondary, update.secondary),
+    };
+}
+function quotaProfile(snapshot, views) {
+    const present = (window) => window.windowDurationMins !== null || window.remainingPercent !== null;
+    return {
+        planType: snapshot.planType ?? null,
+        hasFiveHour: present(views.fiveHour) ? true : present(views.weekly) ? false : null,
     };
 }
 class RefreshController {
@@ -52,6 +62,8 @@ class RefreshController {
     rawSnapshot = {};
     state = {
         status: 'loading',
+        planType: null,
+        hasFiveHour: null,
         fiveHour: EMPTY_VIEWS.fiveHour,
         weekly: EMPTY_VIEWS.weekly,
         resetCredits: null,
@@ -65,6 +77,7 @@ class RefreshController {
     unsubscribeUpdates;
     started = false;
     hasSnapshot = false;
+    lastManualResetAt = 0;
     constructor(client, options) {
         this.client = client;
         this.now = options?.now ?? Date.now;
@@ -97,9 +110,11 @@ class RefreshController {
             this.emit({
                 status: 'ready',
                 ...views,
+                ...quotaProfile(this.rawSnapshot, views),
                 resetCredits: cloneResetCredits(reading.rateLimitResetCredits),
-                isResetting: false,
+                isResetting: this.state.isResetting,
                 lastUpdatedAt: this.now(),
+                lastManualResetAt: this.lastManualResetAt,
                 errorMessage: null,
             });
         })
@@ -130,13 +145,23 @@ class RefreshController {
         this.emit({ ...this.state, isResetting: true, errorMessage: null });
         const operation = this.client.consumeRateLimitResetCredit(credit.id)
             .then(async (result) => {
+            // A read already in progress may still contain the pre-reset quota/cards.
+            if (this.inFlight)
+                await this.inFlight;
+            if (result?.outcome === 'reset') this.lastManualResetAt = this.now();
             if (this.started)
                 await this.refreshNow();
             return result;
         })
             .catch((error) => {
             if (this.started) {
-                this.emit({ ...this.state, isResetting: false, errorMessage: RESET_ERROR });
+                this.emit({
+                    ...this.state,
+                    isResetting: false,
+                    errorMessage: error?.code === 'APP_SERVER_TIMEOUT'
+                        ? '请求超时，重置结果尚未确认，请先刷新额度'
+                        : RESET_ERROR,
+                });
             }
             throw error;
         })
@@ -179,11 +204,14 @@ class RefreshController {
         this.emit({
             status: 'ready',
             ...views,
+            ...quotaProfile(this.rawSnapshot, views),
             resetCredits: cloneResetCredits(this.state.resetCredits),
             isResetting: this.state.isResetting,
             lastUpdatedAt: this.now(),
+            lastManualResetAt: this.lastManualResetAt,
             errorMessage: null,
         });
+        if (!this.inFlight) this.scheduleTimer();
     }
     async readRateLimitsWithRetry() {
         let lastError = new Error('Unable to refresh rate limits');
@@ -206,7 +234,7 @@ class RefreshController {
         this.timer = setTimeout(() => {
             this.timer = undefined;
             void this.refreshNow();
-        }, this.intervalMs);
+        }, nextRefreshDelay(this.state, this.now(), this.intervalMs));
     }
     clearTimer() {
         if (this.timer !== undefined) {

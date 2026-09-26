@@ -11,6 +11,7 @@ const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const DEFAULT_COMMAND = 'codex';
 const DEFAULT_ARGS = ['app-server', '--stdio'];
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 function resolveAppServerCommand(options = {}) {
     const env = options.env ?? process.env;
     if (env.CODEX_CLI_PATH) {
@@ -53,6 +54,7 @@ class AppServerClient {
     command;
     args;
     spawnImpl;
+    requestTimeoutMs;
     child;
     nextRequestId = 1;
     pending = new Map();
@@ -65,6 +67,7 @@ class AppServerClient {
         this.command = options?.command ?? process.env.CODEX_QUOTA_FLOAT_APP_SERVER_COMMAND ?? resolveAppServerCommand();
         this.args = [...(options?.args ?? DEFAULT_ARGS)];
         this.spawnImpl = options?.spawnImpl ?? defaultSpawn;
+        this.requestTimeoutMs = options?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     }
     start() {
         if (this.initialized) {
@@ -73,11 +76,13 @@ class AppServerClient {
         if (this.startPromise) {
             return this.startPromise;
         }
-        this.startPromise = this.startInternal().catch((error) => {
-            this.startPromise = undefined;
+        const operation = this.startInternal().catch((error) => {
+            if (this.startPromise === operation)
+                this.startPromise = undefined;
             throw error;
         });
-        return this.startPromise;
+        this.startPromise = operation;
+        return operation;
     }
     async startInternal() {
         this.nextRequestId = 1;
@@ -85,20 +90,28 @@ class AppServerClient {
         this.child = this.spawnImpl(this.command, this.args);
         const child = this.child;
         this.attachChild(child);
-        await this.sendRequest('initialize', {
-            clientInfo: {
-                name: 'codex-quota-float',
-                title: 'Codex Quota Float',
-                version: '0.1.0',
-            },
-            capabilities: {},
-        });
-        this.sendNotification('initialized');
-        this.initialized = true;
+        try {
+            await this.sendRequest('initialize', {
+                clientInfo: {
+                    name: 'codex-quota-float',
+                    title: 'Codex Quota Float',
+                    version: '0.1.0',
+                },
+                capabilities: {},
+            });
+            if (this.child !== child)
+                throw new Error('AppServerClient connection ended during initialization');
+            this.sendNotification('initialized');
+            this.initialized = true;
+        }
+        catch (error) {
+            this.disconnectChild(child, error);
+            throw error;
+        }
     }
-    readRateLimits() {
+    async readRateLimits() {
         if (!this.initialized || !this.child) {
-            return Promise.reject(new Error('AppServerClient is not started'));
+            await this.start();
         }
         return this.sendRequest('account/rateLimits/read').then((result) => {
             if (!isRecord(result) || !('rateLimits' in result)) {
@@ -141,19 +154,21 @@ class AppServerClient {
             this.rejectPending(new Error('AppServerClient stopped'));
             return;
         }
-        child.stdin.end?.();
-        child.kill?.();
-        this.rejectPending(new Error('AppServerClient stopped'));
-        if (this.child === child) {
-            this.child = undefined;
-        }
-        this.inputBuffer = '';
+        this.disconnectChild(child, new Error('AppServerClient stopped'));
     }
     attachChild(child) {
         child.stdout.on('data', (chunk) => this.handleData(child, chunk));
-        child.on('error', (error) => this.handleChildEnded(child, error));
+        child.stdin.on?.('error', (error) => this.disconnectChild(child, error));
+        child.on('error', (error) => this.disconnectChild(child, error));
         child.on('exit', (code, signal) => this.handleChildEnded(child, new Error(`AppServerClient child exited (code=${code ?? 'unknown'}, signal=${signal ?? 'none'})`)));
         child.on('close', (code, signal) => this.handleChildEnded(child, new Error(`AppServerClient child closed (code=${code ?? 'unknown'}, signal=${signal ?? 'none'})`)));
+    }
+    disconnectChild(child, error) {
+        if (this.child !== child)
+            return;
+        this.handleChildEnded(child, error);
+        child.stdin.end?.();
+        child.kill?.();
     }
     handleChildEnded(child, error) {
         if (this.child !== child) {
@@ -162,6 +177,7 @@ class AppServerClient {
         this.child = undefined;
         this.initialized = false;
         this.startPromise = undefined;
+        this.inputBuffer = '';
         this.rejectPending(error);
     }
     handleData(child, chunk) {
@@ -195,6 +211,7 @@ class AppServerClient {
                 return;
             }
             this.pending.delete(message.id);
+            clearTimeout(pending.timer);
             if ('error' in message) {
                 pending.reject(rpcError(message.error));
             }
@@ -229,13 +246,17 @@ class AppServerClient {
         const id = this.nextRequestId++;
         const message = params === undefined ? { method, id } : { method, id, params };
         return new Promise((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            const timer = setTimeout(() => {
+                const error = new Error(`AppServerClient request timed out: ${method}`);
+                error.code = 'APP_SERVER_TIMEOUT';
+                this.disconnectChild(child, error);
+            }, this.requestTimeoutMs);
+            this.pending.set(id, { resolve, reject, timer });
             try {
                 child.stdin.write(`${JSON.stringify(message)}\n`);
             }
             catch (error) {
-                this.pending.delete(id);
-                reject(error instanceof Error ? error : new Error(String(error)));
+                this.disconnectChild(child, error instanceof Error ? error : new Error(String(error)));
             }
         });
     }
@@ -243,6 +264,7 @@ class AppServerClient {
         const requests = [...this.pending.values()];
         this.pending.clear();
         for (const request of requests) {
+            clearTimeout(request.timer);
             request.reject(error);
         }
     }

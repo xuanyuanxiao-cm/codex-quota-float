@@ -60,6 +60,8 @@ function buildRendererViewModel(state, now = Date.now()) {
     const weeklyText = hasWeekly ? windowText(weekly) : missingStatusText;
     const resetCount = state.resetCredits?.availableCount ?? null;
     return {
+        showFiveHour: state.hasFiveHour !== false,
+        planText: state.planType === 'pro' ? 'Pro' : state.planType === 'plus' ? 'Plus' : state.planType || (state.status === 'loading' ? '正在识别套餐…' : '套餐未确认'),
         fiveHourRingPercent: fiveHour.remainingPercent ?? 0,
         weeklyRingPercent: weekly.remainingPercent ?? 0,
         ringPercent: weekly.remainingPercent ?? 0,

@@ -18,13 +18,18 @@
             <span class="center-divider"></span>
             <span data-center="weekly">…</span>
           </span>
+          <span class="orb-alert alert-low" data-orb-low hidden role="img" aria-label="额度不足"></span>
+          <span class="orb-alert alert-notice" data-orb-notice hidden role="img" aria-label="有新的重置公告">≡</span>
+          <span class="orb-alert alert-recovered" data-orb-recovered hidden role="img" aria-label="额度已恢复">✓</span>
+          <span class="orb-alert alert-expiring" data-orb-expiring hidden role="img" aria-label="重置卡即将过期"><span class="clock-icon"></span></span>
         </button>
         <p class="accessible-status" data-accessible-status aria-live="polite">5 Hours 刷新中…. Weekly 刷新中….</p>
       </section>
 
+      <button class="probability-tag" data-probability-tag hidden title="未来 24 小时额外重置公告 · 实验性估计">重置 —</button>
       <section class="details" data-details aria-label="Quota details">
         <div class="details-heading">
-          <span>Quota windows</span>
+          <span data-plan>正在识别套餐…</span>
           <button class="refresh" type="button" data-action="refresh">Refresh</button>
         </div>
         <div class="window-row" data-detail-window="five-hour">
@@ -34,6 +39,7 @@
             <span class="reset-at" data-reset-at="five-hour" hidden></span>
           </span>
         </div>
+        <p class="quota-alert alert-low" data-alert-window="fiveHour" hidden></p>
         <div class="window-row" data-detail-window="weekly">
           <span>Weekly</span><strong data-value="weekly">刷新中…</strong>
           <span class="reset-timing">
@@ -41,9 +47,11 @@
             <span class="reset-at" data-reset-at="weekly" hidden></span>
           </span>
         </div>
+        <p class="quota-alert alert-low" data-alert-window="weekly" hidden></p>
         <div class="reset-row">
           <span>Resets</span><strong data-reset-count>—</strong><button class="reset" type="button" data-action="reset" disabled>Reset</button>
         </div>
+        <button class="expiry-summary" data-action="expiring-credits" hidden><span class="clock-icon" aria-hidden="true"></span><span data-expiry-summary></span></button>
         <section class="credit-picker" data-credit-picker aria-label="选择重置卡" hidden>
           <div class="credit-picker-heading"><strong>选择重置卡</strong><button type="button" data-action="cancel-reset" aria-label="关闭选卡列表">×</button></div>
           <p>默认选择最快过期的卡，也可以手动更换。</p>
@@ -56,6 +64,9 @@
         </section>
         <p class="status-note" data-note hidden></p>
         <p class="last-updated" data-last-updated hidden></p>
+        <button class="probability-panel" data-probability-panel><span>重置概率 · 未来 24h <strong data-probability-value>—</strong></span><small data-probability-note>实验性估计 · 等待数据</small></button>
+        <button class="trends-button" data-action="trends">▥ 用量趋势 ↗</button>
+        <button class="notice-button" data-action="notices"><span>≡ 重置动态</span><span data-notice-summary>读取中…</span></button>
       </section>
 
       <button class="edge-handle" type="button" data-action="restore-from-edge" aria-label="显示悬浮球">

@@ -23,6 +23,7 @@ function element(initialClasses = []) {
     hidden: false,
     style: { setProperty() {} },
     textContent: '',
+    getBoundingClientRect() { return { x: 0, y: 0, width: 100, height: 100 }; },
     addEventListener(type, listener) { listeners.set(type, listener); },
     removeEventListener(type) { listeners.delete(type); },
     dispatch(type, event = {}) { listeners.get(type)?.(event); },
@@ -75,11 +76,12 @@ test('opens the details panel only after clicking the orb', async () => {
     startDrag() {},
     stopDrag() {},
     setEdgeHidden() {},
-    setExpanded(value) { expandedChanges.push(value); },
+    setLayout(layout) { expandedChanges.push(layout.mode); },
   };
   const windowObject = element();
   windowObject.quota = quota;
   windowObject.confirm = () => false;
+  windowObject.getComputedStyle = () => ({ borderTopLeftRadius: '0px' });
 
   const renderer = fs.readFileSync(
     path.join(__dirname, '..', 'dist', 'renderer', 'renderer.js'),
@@ -92,6 +94,7 @@ test('opens the details panel only after clicking the orb', async () => {
     setTimeout,
     clearTimeout,
     window: windowObject,
+    ResizeObserver: class { observe() {} disconnect() {} },
   });
 
   root.dispatch('pointerenter');
@@ -101,10 +104,10 @@ test('opens the details panel only after clicking the orb', async () => {
   await new Promise((resolve) => setTimeout(resolve, 250));
   assert.equal(orb.attributes.get('aria-expanded'), 'true');
   assert.equal(root.classList.contains('is-collapsed'), false);
-  assert.deepEqual(expandedChanges, [true]);
+  assert.deepEqual(expandedChanges, ['collapsed', 'normal']);
 
   orb.dispatch('click');
   await new Promise((resolve) => setTimeout(resolve, 250));
   assert.equal(root.classList.contains('is-collapsed'), true);
-  assert.deepEqual(expandedChanges, [true, false]);
+  assert.deepEqual(expandedChanges, ['collapsed', 'normal', 'collapsed']);
 });

@@ -22,6 +22,7 @@ win:
         - x64
 
 nsis:
+  include: installer.nsh
   artifactName: Codex Quota Float Setup ${version}.exe
   createDesktopShortcut: true
   createStartMenuShortcut: true

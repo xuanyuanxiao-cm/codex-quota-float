@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>用量趋势 · Codex Quota Float</title>
+  <link rel="stylesheet" href="trends.css"><script src="trends.js" defer></script>
+</head>
+<body>
+  <header><h1>用量趋势</h1><span>Codex Quota Float</span></header>
+  <main>
+    <div class="toolbar"><div class="range" role="group" aria-label="时间范围"><button data-hours="24" aria-pressed="true">最近 24 小时</button><button data-hours="168" aria-pressed="false">最近 7 天</button></div><span class="muted">额度剩余百分比</span></div>
+    <div class="legend"><span id="five-hour-legend"><span class="blue">●</span>5 小时额度</span><span class="purple">●</span>每周额度</div>
+    <div class="chart-wrap"><svg id="chart" viewBox="0 0 900 300" role="img" aria-label="额度剩余量随时间变化的曲线"></svg><div id="tooltip" hidden></div><p id="empty" hidden>暂无历史记录<br><small>成功刷新额度后开始记录，历史会逐步积累。</small></p></div>
+    <p class="chart-note">缺少记录的时段留空 · 额度恢复处断开曲线</p>
+    <section><h2>恢复记录</h2><div id="events"></div></section>
+    <p id="error" role="status" hidden></p>
+    <footer>数据仅保存在本机 · 保留最近 7 天<span id="updated"></span></footer>
+  </main>
+</body>
+</html>

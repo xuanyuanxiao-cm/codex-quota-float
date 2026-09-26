@@ -1,12 +1,16 @@
 {
   "name": "codex-quota-float-companion",
-  "version": "0.1.5",
+  "version": "0.1.12",
   "description": "Compact floating Codex quota companion",
   "private": true,
   "main": "dist/main.js",
   "scripts": {
     "build": "electron-builder --win",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:window": "node test/run-electron-layout.cjs",
+    "test:alerts": "node test/run-electron-layout.cjs --alerts",
+    "test:trends": "node test/run-electron-layout.cjs --trends",
+    "test:notices": "node test/run-electron-layout.cjs --notices"
   },
   "devDependencies": {
     "electron": "32.3.3",

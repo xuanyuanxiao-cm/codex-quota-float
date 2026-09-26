@@ -17,6 +17,7 @@ function element() {
       setProperty: (name, value) => properties.set(name, value),
     },
     textContent: '',
+    getBoundingClientRect() { return { x: 0, y: 0, width: 100, height: 100 }; },
     addEventListener() {},
     removeEventListener() {},
     setAttribute(name, value) { this.attributes.set(name, value); },
@@ -67,6 +68,9 @@ test('renders both quota rings and the two percentage-only center values', () =>
     ['[data-last-updated]', element()],
     ['[data-accessible-status]', element()],
     ['[data-note]', element()],
+    ['[data-detail-window="five-hour"]', element()],
+    ['.center-divider', element()],
+    ['[data-plan]', element()],
   ]);
   const root = element();
   root.querySelector = (selector) => selectors.get(selector) ?? null;
@@ -81,12 +85,14 @@ test('renders both quota rings and the two percentage-only center values', () =>
     startDrag() {},
     stopDrag() {},
     setEdgeHidden() {},
+    setLayout() {},
   };
   const windowObject = {
     quota,
     addEventListener() {},
     removeEventListener() {},
     confirm: () => false,
+    getComputedStyle: () => ({ borderTopLeftRadius: '0px' }),
   };
   const context = {
     console,
@@ -95,6 +101,7 @@ test('renders both quota rings and the two percentage-only center values', () =>
     setTimeout,
     clearTimeout,
     window: windowObject,
+    ResizeObserver: class { observe() {} disconnect() {} },
   };
 
   const renderer = fs.readFileSync(path.join(__dirname, '..', 'dist', 'renderer', 'renderer.js'), 'utf8');
@@ -127,4 +134,21 @@ test('renders both quota rings and the two percentage-only center values', () =>
   assert.equal(weeklyCountdown.textContent, '155h59m');
   assert.equal(fiveHourResetAt.textContent, '26Y 08M 26D 16:52');
   assert.equal(weeklyResetAt.textContent, '26Y 09M 01D 23:59');
+
+  const weeklyOnly = {
+    status: 'ready', planType: 'pro', hasFiveHour: false,
+    weekly: { remainingPercent: 73, resetsAt: null },
+    resetCredits: null, lastUpdatedAt: now, errorMessage: null,
+  };
+  renderState(weeklyOnly);
+  for (const selector of ['[data-window="five-hour"]', '[data-center="five-hour"]', '[data-detail-window="five-hour"]', '.center-divider']) {
+    assert.equal(selectors.get(selector).hidden, true, selector);
+  }
+  assert.equal(selectors.get('[data-plan]').textContent, 'Pro');
+  assert.equal(weeklyCenter.textContent, '73%');
+  assert.doesNotMatch(selectors.get('[data-accessible-status]').textContent, /5 Hours/);
+  renderState({ ...weeklyOnly, planType: 'plus', hasFiveHour: true, fiveHour: { remainingPercent: 82, resetsAt: null } });
+  assert.equal(fiveHourRing.hidden, false);
+  assert.equal(selectors.get('[data-detail-window="five-hour"]').hidden, false);
+  assert.equal(selectors.get('[data-plan]').textContent, 'Plus');
 });

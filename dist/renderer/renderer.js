@@ -47,6 +47,8 @@
     const weeklyText = hasWeekly ? windowText(weekly) : missingStatusText;
     const resetCount = state.resetCredits?.availableCount ?? null;
     return {
+      showFiveHour: state.hasFiveHour !== false,
+      planText: state.planType === 'pro' ? 'Pro' : state.planType === 'plus' ? 'Plus' : state.planType || (state.status === 'loading' ? '正在识别套餐…' : '套餐未确认'),
       fiveHourRingPercent: fiveHour.remainingPercent ?? 0,
       weeklyRingPercent: weekly.remainingPercent ?? 0,
       ringPercent: weekly.remainingPercent ?? 0,
@@ -108,6 +110,9 @@
     const confirmReset = root.querySelector('[data-action="confirm-reset"]');
     const edgeHandle = root.querySelector('[data-action="restore-from-edge"]');
     const fiveHourRing = root.querySelector('[data-window="five-hour"]');
+    const fiveHourRow = root.querySelector('[data-detail-window="five-hour"]');
+    const centerDivider = root.querySelector('.center-divider');
+    const planLabel = root.querySelector('[data-plan]');
     const weeklyRing = root.querySelector('[data-window="weekly"]');
     const fiveHourCenter = root.querySelector('[data-center="five-hour"]');
     const weeklyCenter = root.querySelector('[data-center="weekly"]');
@@ -120,6 +125,18 @@
     const lastUpdated = root.querySelector("[data-last-updated]");
     const fallback = root.querySelector("[data-accessible-status]");
     const note = root.querySelector("[data-note]");
+    const orbLow = root.querySelector("[data-orb-low]");
+    const orbRecovered = root.querySelector("[data-orb-recovered]");
+    const orbExpiring = root.querySelector("[data-orb-expiring]");
+    const expiryButton = root.querySelector('[data-action="expiring-credits"]');
+    const expirySummary = root.querySelector("[data-expiry-summary]");
+    const trendsButton = root.querySelector('[data-action="trends"]');
+    const noticesButton = root.querySelector('[data-action="notices"]');
+    const orbNotice = root.querySelector('[data-orb-notice]');
+    const noticeSummary = root.querySelector('[data-notice-summary]');
+    const probabilityTag = root.querySelector('[data-probability-tag]');
+    const probabilityPanel = root.querySelector('[data-probability-panel]');
+    let latestNotices;
     if (!orb || !details || !refresh || !reset || !resetCount || !creditPicker || !creditList || !pickerSelection || !creditError || !cancelReset || !confirmReset || !edgeHandle || !fiveHourRing || !weeklyRing || !fiveHourCenter || !weeklyCenter || !fiveHourText || !weeklyText || !fiveHourCountdown || !fiveHourResetAt || !weeklyCountdown || !weeklyResetAt || !lastUpdated || !fallback || !note) {
       throw new Error("Quota renderer markup is incomplete");
     }
@@ -127,14 +144,35 @@
     let latestState;
     let selectedCreditId;
     let resetPending = false;
+    let edgeHidden = false;
+    let lastLayout;
     let dragStartScreenY;
     let dragPointerOffsetY = 0;
     let movedDuringDrag = false;
+    const syncWindowLayout = () => {
+      if (edgeHidden) return;
+      const mode = !creditPicker.hidden ? "picker" : interaction === "pinned" ? "normal" : "collapsed";
+      const elements = mode === "picker" ? [details] : mode === "normal" ? [orb, details] : [orb];
+      if (mode !== "picker") elements.push(...[orbLow, orbRecovered, orbExpiring, orbNotice].filter((element) => element && !element.hidden));
+      if (mode !== "picker" && probabilityTag && !probabilityTag.hidden) elements.push(probabilityTag);
+      const regions = elements.map((element) => {
+        const { x, y, width, height } = element.getBoundingClientRect();
+        const radius = Math.min(parseFloat(window.getComputedStyle(element).borderTopLeftRadius) || 0, width / 2, height / 2);
+        return { x, y, width, height, radius };
+      });
+      const layout = { mode, height: Math.ceil(root.getBoundingClientRect().height), regions };
+      const key = JSON.stringify(layout);
+      if (key !== lastLayout) {
+        lastLayout = key;
+        void api.setLayout(layout);
+      }
+    };
     const renderInteraction = () => {
       root.dataset.state = interaction;
       root.classList.toggle("is-collapsed", interaction === "collapsed");
       root.classList.toggle("is-pinned", interaction === "pinned");
       orb.setAttribute("aria-expanded", String(interaction !== "collapsed"));
+      syncWindowLayout();
     };
     const availableCredits = (state) => state.resetCredits?.credits.filter((credit) => credit.status === "available") ?? [];
     const creditName = (index) => `重置卡 ${index + 1}`;
@@ -155,6 +193,12 @@
           : "到期时间未知";
         expiry.textContent = `${expiryText} · 编号 …${credit.id.slice(-4)}`;
         option.append(name, expiry);
+        if (Number.isFinite(credit.expiresAt) && toMillis(credit.expiresAt) > now() && toMillis(credit.expiresAt) - now() <= 86400000) {
+          const warning = document.createElement("span");
+          warning.className = "credit-expiring";
+          warning.textContent = `即将过期 · 剩余 ${formatCountdown(credit.expiresAt, now())}`;
+          option.append(warning);
+        }
         option.addEventListener("click", () => {
           selectedCreditId = credit.id;
           creditError.hidden = true;
@@ -170,10 +214,17 @@
       creditPicker.hidden = true;
       root.classList.toggle("is-picking", false);
       creditError.hidden = true;
+      syncWindowLayout();
     };
     const renderState = (state) => {
       latestState = state;
       const model = buildRendererViewModel(state, now());
+      root.classList.toggle('is-weekly-only', !model.showFiveHour);
+      fiveHourRing.hidden = !model.showFiveHour;
+      fiveHourCenter.hidden = !model.showFiveHour;
+      if (fiveHourRow) fiveHourRow.hidden = !model.showFiveHour;
+      if (centerDivider) centerDivider.hidden = !model.showFiveHour;
+      if (planLabel) planLabel.textContent = model.planText;
       setProgress(fiveHourRing, model.fiveHourRingPercent);
       setProgress(weeklyRing, model.weeklyRingPercent);
       fiveHourRing.setAttribute("aria-label", `Five-hour remaining ${model.fiveHourText}`);
@@ -191,13 +242,34 @@
       reset.disabled = model.resetDisabled;
       note.textContent = model.note ?? "";
       note.hidden = model.note === null;
-      fallback.textContent = `5 Hours ${model.fiveHourText}. Weekly ${model.weeklyText}.`;
+      fallback.textContent = `${model.planText}. ${model.showFiveHour ? `5 Hours ${model.fiveHourText}. ` : ''}Weekly ${model.weeklyText}.`;
+      const alertWindows = state.status === "ready" ? state.alerts?.windows ?? {} : {};
+      const low = Object.values(alertWindows).some((value) => value.low);
+      const recovered = Object.values(alertWindows).some((value) => value.recoveredUntil > now());
+      const expiring = (state.alerts?.expiringCredits ?? []).filter((credit) => credit.expiresAt > now());
+      if (orbLow) orbLow.hidden = !low;
+      if (orbRecovered) orbRecovered.hidden = low || !recovered;
+      if (orbExpiring) orbExpiring.hidden = expiring.length === 0;
+      const alertDescription = [low ? "额度不足" : recovered ? "额度已恢复" : "", expiring.length ? `${expiring.length} 张重置卡即将过期` : ""].filter(Boolean).join("；");
+      orb.setAttribute("title", alertDescription || "点击查看额度详情");
+      orb.setAttribute("aria-label", alertDescription ? `查看额度详情：${alertDescription}` : "查看额度详情");
+      for (const key of ["fiveHour", "weekly"]) {
+        const label = root.querySelector(`[data-alert-window="${key}"]`);
+        if (!label) continue;
+        const alert = alertWindows[key];
+        const isRecovered = alert?.recoveredUntil > now() && !alert?.low;
+        label.hidden = !alert?.low && !isRecovered;
+        label.className = `quota-alert ${isRecovered ? "alert-recovered" : "alert-low"}`;
+        label.textContent = isRecovered ? "✓ 额度已恢复" : alert?.exhausted ? "● 额度已用尽" : "● 额度偏低";
+      }
+      if (expiryButton) expiryButton.hidden = expiring.length === 0;
+      if (expirySummary) expirySummary.textContent = expiring.length ? `${expiring.length} 张即将过期 · 最快 ${formatCountdown(expiring[0].expiresAt, now())} ›` : "";
       if (!creditPicker.hidden) renderCreditPicker(state);
+      syncWindowLayout();
     };
     const togglePinned = () => {
       interaction = interaction === "pinned" ? "collapsed" : "pinned";
       renderInteraction();
-      void api.setExpanded(interaction === "pinned");
     };
     const hideToEdge = () => {
       interaction = "collapsed";
@@ -253,6 +325,7 @@
       creditPicker.hidden = false;
       root.classList.toggle("is-picking", true);
       renderCreditPicker(latestState);
+      syncWindowLayout();
     };
     const onCancelReset = () => {
       if (!resetPending) closeCreditPicker();
@@ -270,7 +343,7 @@
           creditError.hidden = false;
         }
       } catch {
-        creditError.textContent = "额度重置失败，请稍后重试";
+        creditError.textContent = latestState?.errorMessage ?? "额度重置失败，请稍后重试";
         creditError.hidden = false;
       } finally {
         resetPending = false;
@@ -281,10 +354,11 @@
       void api.setEdgeHidden(false);
     };
     const renderEdgeHidden = (hidden) => {
+      edgeHidden = hidden;
       interaction = "collapsed";
-      renderInteraction();
-      closeCreditPicker();
       root.classList.toggle("is-edge-hidden", hidden);
+      closeCreditPicker();
+      renderInteraction();
     };
     orb.addEventListener("click", onOrbClick);
     orb.addEventListener("dblclick", onOrbDoubleClick);
@@ -293,15 +367,62 @@
     window.addEventListener("pointerup", onOrbPointerUp);
     refresh.addEventListener("click", onRefresh);
     reset.addEventListener("click", onReset);
+    const onTrends = () => { void api.openTrends(); };
+    trendsButton?.addEventListener("click", onTrends);
+    const onNotices = () => { void api.openNotices?.(); };
+    noticesButton?.addEventListener("click", onNotices);
+    probabilityTag?.addEventListener("click", onNotices);
+    probabilityPanel?.addEventListener("click", onNotices);
+    const renderNotices = (state) => {
+      latestNotices = state;
+      if (orbNotice) orbNotice.hidden = !state.enabled || !state.unread;
+      if (noticeSummary) noticeSummary.textContent = !state.enabled ? "自动检查已关闭" : state.error ? "更新失败 · 点击查看" : state.unread ? `${state.unread} 条新公告 · 账户待确认` : state.loading ? "正在检查公告…" : state.records?.length ? "查看公告与账户状态 ›" : "暂无新动态 ›";
+      const forecast = state.forecast;
+      const age = now() - forecast?.asOf;
+      const available = forecast?.status === "estimated" && age >= 0 && age <= 21600000;
+      const value = state.unread ? "已宣布" : available ? `${forecast.percent}%` : "—";
+      const updated = forecast?.asOf ? new Date(forecast.asOf).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+      if (probabilityTag) {
+        probabilityTag.hidden = state.showProbability !== true;
+        probabilityTag.textContent = state.unread ? "重置已宣布" : `重置 ${value}`;
+        probabilityTag.title = state.unread ? "有新的已核验公告，点击查看" : available ? `未来 24 小时额外重置公告 · 实验性估计 ${value} · ${updated} 更新` : "未来 24 小时额外重置公告 · 暂无法估计";
+      }
+      const probabilityValue = root.querySelector('[data-probability-value]');
+      const probabilityNote = root.querySelector('[data-probability-note]');
+      if (probabilityValue) probabilityValue.textContent = value;
+      if (probabilityNote) probabilityNote.textContent = state.unread ? "新公告已核验 · 点击查看" : available ? `实验性估计 · ${updated} 更新 ›` : "暂无法估计 · 点击查看依据 ›";
+      syncWindowLayout();
+    };
+    const unsubscribeNotices = api.subscribeNotices?.(renderNotices);
+    api.readNotices?.().then(renderNotices).catch(() => { if (noticeSummary) noticeSummary.textContent = "暂时无法读取 · 点击重试"; });
+    expiryButton?.addEventListener("click", onReset);
     cancelReset.addEventListener("click", onCancelReset);
     confirmReset.addEventListener("click", onConfirmReset);
     edgeHandle.addEventListener("click", onRestoreFromEdge);
     renderInteraction();
+    const resizeObserver = new ResizeObserver(syncWindowLayout);
+    resizeObserver.observe(root);
     const unsubscribe = api.subscribe(renderState);
     const unsubscribeEdgeHidden = api.subscribeEdgeHidden(renderEdgeHidden);
+    const unsubscribeOpenDetails = api.subscribeOpenDetails?.((target) => {
+      interaction = "pinned";
+      renderInteraction();
+      if (target === "credits") onReset();
+    });
+    const clockTimer = window.setInterval?.(() => {
+      if (latestState) renderState(latestState);
+      if (latestNotices) renderNotices(latestNotices);
+    }, 30000);
     return () => {
       unsubscribe();
       unsubscribeEdgeHidden();
+      unsubscribeOpenDetails?.();
+      unsubscribeNotices?.();
+      noticesButton?.removeEventListener("click", onNotices);
+      probabilityTag?.removeEventListener("click", onNotices);
+      probabilityPanel?.removeEventListener("click", onNotices);
+      window.clearInterval?.(clockTimer);
+      resizeObserver.disconnect();
       orb.removeEventListener("click", onOrbClick);
       orb.removeEventListener("dblclick", onOrbDoubleClick);
       orb.removeEventListener("pointerdown", onOrbPointerDown);
@@ -309,6 +430,8 @@
       window.removeEventListener("pointerup", onOrbPointerUp);
       refresh.removeEventListener("click", onRefresh);
       reset.removeEventListener("click", onReset);
+      trendsButton?.removeEventListener("click", onTrends);
+      expiryButton?.removeEventListener("click", onReset);
       cancelReset.removeEventListener("click", onCancelReset);
       confirmReset.removeEventListener("click", onConfirmReset);
       edgeHandle.removeEventListener("click", onRestoreFromEdge);

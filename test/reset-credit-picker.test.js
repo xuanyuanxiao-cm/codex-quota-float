@@ -16,6 +16,7 @@ function element() {
     hidden: false,
     style: { setProperty() {} },
     textContent: '',
+    getBoundingClientRect() { return { x: 0, y: 0, width: 100, height: 100 }; },
     addEventListener(type, listener) { listeners.set(type, listener); },
     removeEventListener(type) { listeners.delete(type); },
     setAttribute(name, value) { attributes.set(name, value); },
@@ -49,13 +50,15 @@ function mount(outcome = 'reset') {
   const quota = {
     subscribe(listener) { renderState = listener; return () => {}; },
     subscribeEdgeHidden() { return () => {}; },
-    resetQuota: async (creditId) => { calls.push(creditId); return { outcome }; },
+    resetQuota: async (creditId) => { calls.push(creditId); return typeof outcome === 'function' ? outcome() : { outcome }; },
     refreshNow() {}, setEdgeHidden() {}, startDrag() {}, stopDrag() {}, moveToY() {},
+    setLayout() {},
   };
   const script = fs.readFileSync(path.join(__dirname, '..', 'dist', 'renderer', 'renderer.js'), 'utf8');
   vm.runInNewContext(script, {
     document: { querySelector: (selector) => selector === '[data-quota-app]' ? root : null, createElement: element },
-    window: { quota, addEventListener() {}, removeEventListener() {} },
+    window: { quota, addEventListener() {}, removeEventListener() {}, getComputedStyle: () => ({ borderTopLeftRadius: '0px' }) },
+    ResizeObserver: class { observe() {} disconnect() {} },
     Date, Intl, setTimeout, clearTimeout,
   });
   return { selectors, calls, renderState };
@@ -141,4 +144,21 @@ test('canceling the native confirmation keeps the picker open without showing a 
   assert.equal(selectors.get('[data-credit-error]').hidden, true);
   assert.equal(selectors.get('[data-credit-picker]').hidden, false);
   assert.equal(selectors.get('[data-action="confirm-reset"]').disabled, false);
+});
+
+test('a reset timeout shows the unconfirmed-result message and lets the user close the picker', async () => {
+  const message = '请求超时，重置结果尚未确认，请先刷新额度';
+  const { selectors, renderState } = mount(() => {
+    renderState({ ...state, errorMessage: message });
+    throw new Error('AppServerClient request timed out: account/rateLimitResetCredit/consume');
+  });
+  renderState(state);
+  selectors.get('[data-action="reset"]').click();
+  selectors.get('[data-action="confirm-reset"]').click();
+  await new Promise(setImmediate);
+  assert.equal(selectors.get('[data-credit-error]').textContent, message);
+  assert.equal(selectors.get('[data-credit-error]').hidden, false);
+  assert.equal(selectors.get('[data-action="confirm-reset"]').disabled, false);
+  selectors.get('[data-action="cancel-reset"]').click();
+  assert.equal(selectors.get('[data-credit-picker]').hidden, true);
 });
