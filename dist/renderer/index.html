@@ -11,6 +11,8 @@
   <body>
     <main class="quota-app is-collapsed" data-quota-app data-state="collapsed">
       <section class="orb-shell" aria-label="Codex quota">
+        <div class="alert-summary" data-alert-summary hidden aria-live="polite"></div>
+        <div class="orb-stack">
         <button class="orb" type="button" data-action="toggle-pin" aria-expanded="false" aria-label="Open quota details">
           <span class="ring ring--weekly" data-window="weekly" role="img" aria-label="Weekly remaining"></span>
           <span class="ring ring--five-hour" data-window="five-hour" role="img" aria-label="Five-hour remaining"></span>
@@ -19,11 +21,12 @@
             <span class="center-divider"></span>
             <span data-center="weekly">…</span>
           </span>
-          <span class="orb-alert alert-low" data-orb-low hidden role="img" aria-label="额度不足"></span>
-          <span class="orb-alert alert-notice" data-orb-notice hidden role="img" aria-label="有新的重置公告">≡</span>
-          <span class="orb-alert alert-recovered" data-orb-recovered hidden role="img" aria-label="额度已恢复">✓</span>
-          <span class="orb-alert alert-expiring" data-orb-expiring hidden role="img" aria-label="重置卡即将过期"><span class="clock-icon"></span></span>
         </button>
+          <button class="orb-alert alert-low" data-orb-low hidden type="button" aria-label="查看额度警告">!</button>
+          <button class="orb-alert alert-notice" data-orb-notice hidden type="button" aria-label="查看新的已核验公告"><span class="message-icon" aria-hidden="true"></span></button>
+          <button class="orb-alert alert-recovered" data-orb-recovered hidden type="button" aria-label="查看额度恢复详情">✓</button>
+          <button class="orb-alert alert-expiring" data-orb-expiring hidden type="button" aria-label="查看即将过期的重置卡"><span class="clock-icon" aria-hidden="true"></span></button>
+        </div>
         <p class="accessible-status" data-accessible-status aria-live="polite">5 Hours 刷新中…. Weekly 刷新中….</p>
       </section>
 

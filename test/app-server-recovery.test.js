@@ -3,6 +3,7 @@ const { EventEmitter } = require('node:events');
 const test = require('node:test');
 const { AppServerClient } = require('../dist/app-server-client');
 const { RefreshController } = require('../dist/refresh-controller');
+const { QuotaAlerts } = require('../dist/alerts');
 
 const reading = {
   rateLimits: { primary: { usedPercent: 80, windowDurationMins: 300 } },
@@ -41,6 +42,28 @@ function setup(t, respond) {
   t.after(() => { controller.stop(); return client.stop(); });
   return { client, controller, children, requests };
 }
+
+for (const notificationLast of [true, false]) test(`quota messages retain wire order when notification arrives ${notificationLast ? 'after' : 'before'} a read reply`, async t => {
+  const { controller } = setup(t, (request, child) => {
+    if (request.method !== 'account/rateLimits/read') return;
+    const response = { id: request.id, result: { ...reading, rateLimits: {
+      primary: { usedPercent: 20, windowDurationMins: 300 },
+      secondary: { usedPercent: 40, windowDurationMins: 10080 },
+    } } };
+    const notification = { method: 'account/rateLimits/updated', params: { rateLimits: { primary: { usedPercent: 100 } } } };
+    const messages = notificationLast ? [response, notification] : [notification, response];
+    child.stdout.emit('data', messages.map(message => JSON.stringify(message) + '\n').join(''));
+    return false;
+  });
+  const alerts = new QuotaAlerts();
+  const notifications = [];
+  controller.subscribe(state => notifications.push(alerts.update(state).alerts.quotaBadge));
+  await controller.start();
+  assert.equal(controller.state.fiveHour.remainingPercent, notificationLast ? 0 : 80);
+  assert.equal(controller.state.weekly.remainingPercent, 60, 'sparse updates retain fields from the full reply');
+  assert.equal(controller.state.resetCredits.availableCount, 1);
+  if (notificationLast) assert.equal(notifications.some(message => message?.severity === 'recovered'), false);
+});
 
 test('Refresh retries initialization after the initial connection fails', async (t) => {
   const { controller, children } = setup(t, (request, child, attempt) => {

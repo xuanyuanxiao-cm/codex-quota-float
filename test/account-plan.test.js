@@ -86,5 +86,6 @@ test('weekly-only accounts retain weekly warnings and card expiry alerts', async
   });
   assert.equal(result.alerts.windows.fiveHour, undefined);
   assert.equal(result.alerts.windows.weekly.low, true);
-  assert.deepEqual(result.notifications.map(n => n.kind), ['low', 'expiring']);
+  assert.equal(result.alerts.quotaBadge.severity, 'critical');
+  assert.equal(result.alerts.creditBadges.length, 1);
 });

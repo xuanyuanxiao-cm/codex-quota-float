@@ -21,12 +21,12 @@ function rightDockPosition(workArea, windowSize, requestedY, rightInset = 8) {
 }
 function rightDockBounds(workArea, layout, normalY, contentHeight) {
     const expanded = layout === 'normal' || layout === 'picker';
-    const size = expanded ? { width: exports.NORMAL_WINDOW_SIZE.width, height: Math.min(contentHeight ?? exports.NORMAL_WINDOW_SIZE.height, workArea.height) } : layout === 'collapsed' ? { width: exports.COLLAPSED_WINDOW_SIZE.width, height: Math.max(100, Math.min(contentHeight ?? 100, workArea.height)) } : exports.EDGE_HANDLE_SIZE;
+    const size = expanded ? { width: exports.NORMAL_WINDOW_SIZE.width, height: Math.min(contentHeight ?? exports.NORMAL_WINDOW_SIZE.height, workArea.height) } : layout === 'collapsed' || layout === 'summary' ? { width: layout === 'summary' ? exports.NORMAL_WINDOW_SIZE.width : exports.COLLAPSED_WINDOW_SIZE.width, height: Math.max(100, Math.min(contentHeight ?? 100, workArea.height)) } : exports.EDGE_HANDLE_SIZE;
     const requestedY = expanded
         ? normalY
         : normalY === undefined
             ? undefined
-            : normalY + NORMAL_ORB_CENTER_OFFSET_Y - (layout === 'collapsed' ? COLLAPSED_ORB_CENTER_OFFSET_Y : Math.round(size.height / 2));
+            : normalY + NORMAL_ORB_CENTER_OFFSET_Y - (layout === 'collapsed' || layout === 'summary' ? COLLAPSED_ORB_CENTER_OFFSET_Y : Math.round(size.height / 2));
     const position = rightDockPosition(workArea, size, requestedY, layout === 'edgeHidden' ? 0 : 8);
     return { ...position, ...size };
 }

@@ -87,3 +87,26 @@ test('stop during a retry prevents additional reads and state emissions', async 
   s.controller.stop(); await s.tick(7000); await pending;
   assert.equal(s.reads(), 1); assert.equal(s.states.length, count);
 });
+
+test('continuous quota notifications cannot postpone full reads and reset-card updates', async t => {
+  const s = setup(t); await s.controller.start();
+  const next = { ...reading(50), rateLimitResetCredits: { availableCount: 1, credits: [{ id: 'new-card', status: 'available' }] } };
+  s.queue.push(() => Promise.resolve(next));
+  for (let minute = 1; minute <= 10; minute++) {
+    await s.tick(60000);
+    s.emit({ primary: { usedPercent: minute } });
+    if (minute === 5) {
+      assert.equal(s.reads(), 2);
+      assert.equal(s.controller.state.resetCredits.credits[0].id, 'new-card');
+    }
+  }
+  assert.equal(s.reads(), 3);
+});
+
+test('notifications can bring a quota-boundary refresh forward', async t => {
+  const s = setup(t); await s.controller.start();
+  await s.tick(60000);
+  s.emit({ primary: { resetsAt: (Date.now() + 30000) / 1000 } });
+  await s.tick(30999); assert.equal(s.reads(), 1);
+  await s.tick(1); assert.equal(s.reads(), 2);
+});

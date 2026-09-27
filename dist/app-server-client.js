@@ -36,11 +36,15 @@ function resolveAppServerCommand(options = {}) {
     }
     return DEFAULT_COMMAND;
 }
-const defaultSpawn = (command, args) => (0, node_child_process_1.spawn)(command, args, {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    shell: process.env.CODEX_QUOTA_FLOAT_APP_SERVER_COMMAND?.toLowerCase().endsWith('.cmd') ?? false,
-    cwd: process.env.CODEX_QUOTA_FLOAT_APP_SERVER_CWD || undefined,
-});
+const defaultSpawn = (command, args) => {
+    const shell = process.platform === 'win32' && (/\.(?:cmd|bat)$/i.test(command) || command === DEFAULT_COMMAND);
+    return (0, node_child_process_1.spawn)(shell ? `"${command}"` : command, args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell,
+        windowsHide: true,
+        cwd: process.env.CODEX_QUOTA_FLOAT_APP_SERVER_CWD || undefined,
+    });
+};
 function isRecord(value) {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -109,20 +113,23 @@ class AppServerClient {
             throw error;
         }
     }
-    async readRateLimits() {
+    async readRateLimits(onReading) {
         if (!this.initialized || !this.child) {
             await this.start();
         }
-        return this.sendRequest('account/rateLimits/read').then((result) => {
+        return this.sendRequest('account/rateLimits/read', undefined, (result) => {
             if (!isRecord(result) || !('rateLimits' in result)) {
                 throw new Error('Invalid rate limits response');
             }
-            return {
+            const reading = {
                 rateLimits: result.rateLimits,
                 rateLimitResetCredits: isRecord(result.rateLimitResetCredits)
                     ? result.rateLimitResetCredits
                     : null,
             };
+            // Apply the reply before parsing any later notification in this chunk.
+            onReading?.(reading);
+            return reading;
         });
     }
     consumeRateLimitResetCredit(creditId) {
@@ -240,7 +247,7 @@ class AppServerClient {
         }
         child.stdin.write(`${JSON.stringify({ method })}\n`);
     }
-    sendRequest(method, params) {
+    sendRequest(method, params, transformResult) {
         const child = this.child;
         if (!child) {
             return Promise.reject(new Error('AppServerClient child is not running'));
@@ -253,7 +260,10 @@ class AppServerClient {
                 error.code = 'APP_SERVER_TIMEOUT';
                 this.disconnectChild(child, error);
             }, this.requestTimeoutMs);
-            this.pending.set(id, { resolve, reject, timer });
+            this.pending.set(id, { resolve: (result) => {
+                try { resolve(transformResult ? transformResult(result) : result); }
+                catch (error) { reject(error); }
+            }, reject, timer });
             try {
                 child.stdin.write(`${JSON.stringify(message)}\n`);
             }

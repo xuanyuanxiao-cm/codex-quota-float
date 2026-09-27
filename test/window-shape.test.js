@@ -35,10 +35,12 @@ test('normal and picker bounds use their measured height without moving the orb 
   assert.deepEqual(position.rightDockBounds(area, 'picker', 320, 360), { x: 1626, y: 320, width: 286, height: 360 });
   assert.deepEqual(position.rightDockBounds(area, 'collapsed', 320, 100), { x: 1812, y: 328, width: 100, height: 100 });
   assert.deepEqual(position.rightDockBounds(area, 'collapsed', 320, 131), { x: 1812, y: 328, width: 100, height: 131 });
+  assert.deepEqual(position.rightDockBounds(area, 'summary', 320, 170), { x: 1626, y: 328, width: 286, height: 170 });
 });
 
 test('content near the bottom is clamped inside the work area at the current height', () => {
   const area = { x: -1920, y: 0, width: 1920, height: 1040 };
   assert.deepEqual(position.rightDockBounds(area, 'normal', 900, 318), { x: -294, y: 722, width: 286, height: 318 });
   assert.deepEqual(position.rightDockBounds(area, 'collapsed', 1000, 131), { x: -108, y: 909, width: 100, height: 131 });
+  assert.deepEqual(position.rightDockBounds(area, 'summary', 1000, 170), { x: -294, y: 870, width: 286, height: 170 });
 });

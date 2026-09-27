@@ -136,6 +136,7 @@
     const noticeSummary = root.querySelector('[data-notice-summary]');
     const probabilityTag = root.querySelector('[data-probability-tag]');
     const probabilityPanel = root.querySelector('[data-probability-panel]');
+    const alertSummary = root.querySelector('[data-alert-summary]');
     let latestNotices;
     if (!orb || !details || !refresh || !reset || !resetCount || !creditPicker || !creditList || !pickerSelection || !creditError || !cancelReset || !confirmReset || !edgeHandle || !fiveHourRing || !weeklyRing || !fiveHourCenter || !weeklyCenter || !fiveHourText || !weeklyText || !fiveHourCountdown || !fiveHourResetAt || !weeklyCountdown || !weeklyResetAt || !lastUpdated || !fallback || !note) {
       throw new Error("Quota renderer markup is incomplete");
@@ -150,9 +151,21 @@
     let dragPointerOffsetY = 0;
     let movedDuringDrag = false;
     const syncWindowLayout = () => {
+      if (alertSummary) {
+        const messages = [];
+        if (latestState?.alerts?.quotaBadge) messages.push(latestState.alerts.quotaBadge.text);
+        const credits = (latestState?.alerts?.creditBadges ?? []).filter(c => c.expiresAt > now());
+        if (credits.length) messages.push(`${credits.length} 张重置卡将在 24 小时内到期`);
+        if (latestNotices?.unread) messages.push(`${latestNotices.unread} 条新核验公告待查看`);
+        if (messages.length && ['stale', 'error'].includes(latestState?.status)) messages.push('更新失败，以上为最近一次数据');
+        alertSummary.textContent = messages.join('\n');
+        alertSummary.hidden = !messages.length || interaction !== 'collapsed' || edgeHidden || !creditPicker.hidden;
+        root.classList.toggle('has-alert-summary', !alertSummary.hidden);
+      }
       if (edgeHidden) return;
-      const mode = !creditPicker.hidden ? "picker" : interaction === "pinned" ? "normal" : "collapsed";
+      const mode = !creditPicker.hidden ? "picker" : interaction === "pinned" ? "normal" : alertSummary && !alertSummary.hidden ? "summary" : "collapsed";
       const elements = mode === "picker" ? [details] : mode === "normal" ? [orb, details] : [orb];
+      if (mode === 'summary') elements.push(alertSummary);
       if (mode !== "picker") elements.push(...[orbLow, orbRecovered, orbExpiring, orbNotice].filter((element) => element && !element.hidden));
       if (mode !== "picker" && probabilityTag && !probabilityTag.hidden) elements.push(probabilityTag);
       const regions = elements.map((element) => {
@@ -243,33 +256,45 @@
       note.textContent = model.note ?? "";
       note.hidden = model.note === null;
       fallback.textContent = `${model.planText}. ${model.showFiveHour ? `5 Hours ${model.fiveHourText}. ` : ''}Weekly ${model.weeklyText}.`;
-      const alertWindows = state.status === "ready" ? state.alerts?.windows ?? {} : {};
-      const low = Object.values(alertWindows).some((value) => value.low);
-      const recovered = Object.values(alertWindows).some((value) => value.recoveredUntil > now());
+      const alertWindows = state.alerts?.windows ?? {};
+      const badge = state.alerts?.quotaBadge;
+      const low = badge && badge.severity !== 'recovered';
+      const recovered = badge?.severity === 'recovered';
       const expiring = (state.alerts?.expiringCredits ?? []).filter((credit) => credit.expiresAt > now());
-      if (orbLow) orbLow.hidden = !low;
+      const pendingCredits = (state.alerts?.creditBadges ?? []).filter(c => c.expiresAt > now());
+      if (orbLow) {
+        orbLow.hidden = !low;
+        orbLow.className = `orb-alert alert-${badge?.severity ?? 'low'}`;
+        orbLow.title = badge?.text ?? '';
+        orbLow.setAttribute('aria-label', badge?.text ?? '查看额度详情');
+      }
       if (orbRecovered) orbRecovered.hidden = low || !recovered;
-      if (orbExpiring) orbExpiring.hidden = expiring.length === 0;
-      const alertDescription = [low ? "额度不足" : recovered ? "额度已恢复" : "", expiring.length ? `${expiring.length} 张重置卡即将过期` : ""].filter(Boolean).join("；");
+      if (orbExpiring) orbExpiring.hidden = pendingCredits.length === 0;
+      const alertDescription = [badge?.text, pendingCredits.length ? `${pendingCredits.length} 张重置卡即将过期` : ""].filter(Boolean).join("；");
       orb.setAttribute("title", alertDescription || "点击查看额度详情");
       orb.setAttribute("aria-label", alertDescription ? `查看额度详情：${alertDescription}` : "查看额度详情");
       for (const key of ["fiveHour", "weekly"]) {
         const label = root.querySelector(`[data-alert-window="${key}"]`);
         if (!label) continue;
         const alert = alertWindows[key];
-        const isRecovered = alert?.recoveredUntil > now() && !alert?.low;
-        label.hidden = !alert?.low && !isRecovered;
-        label.className = `quota-alert ${isRecovered ? "alert-recovered" : "alert-low"}`;
-        label.textContent = isRecovered ? "✓ 额度已恢复" : alert?.exhausted ? "● 额度已用尽" : "● 额度偏低";
+        label.hidden = !alert?.low;
+        label.className = `quota-alert alert-${alert?.severity ?? 'low'}`;
+        label.textContent = alert?.exhausted ? "● 额度已用尽" : alert?.severity === 'critical' ? '● 额度余量很低' : "● 额度偏低";
       }
       if (expiryButton) expiryButton.hidden = expiring.length === 0;
       if (expirySummary) expirySummary.textContent = expiring.length ? `${expiring.length} 张即将过期 · 最快 ${formatCountdown(expiring[0].expiresAt, now())} ›` : "";
       if (!creditPicker.hidden) renderCreditPicker(state);
       syncWindowLayout();
     };
+    const openQuotaDetails = () => {
+      interaction = 'pinned';
+      renderInteraction();
+      void api.dismissAlert?.('quota');
+    };
     const togglePinned = () => {
       interaction = interaction === "pinned" ? "collapsed" : "pinned";
       renderInteraction();
+      if (interaction === 'pinned') void api.dismissAlert?.('quota');
     };
     const hideToEdge = () => {
       interaction = "collapsed";
@@ -324,8 +349,10 @@
       creditError.hidden = true;
       creditPicker.hidden = false;
       root.classList.toggle("is-picking", true);
+      interaction = 'pinned';
       renderCreditPicker(latestState);
-      syncWindowLayout();
+      renderInteraction();
+      void api.dismissAlert?.('credits');
     };
     const onCancelReset = () => {
       if (!resetPending) closeCreditPicker();
@@ -371,11 +398,15 @@
     trendsButton?.addEventListener("click", onTrends);
     const onNotices = () => { void api.openNotices?.(); };
     noticesButton?.addEventListener("click", onNotices);
+    orbNotice?.addEventListener('click', onNotices);
+    orbLow?.addEventListener('click', openQuotaDetails);
+    orbRecovered?.addEventListener('click', openQuotaDetails);
+    orbExpiring?.addEventListener('click', onReset);
     probabilityTag?.addEventListener("click", onNotices);
     probabilityPanel?.addEventListener("click", onNotices);
     const renderNotices = (state) => {
       latestNotices = state;
-      if (orbNotice) orbNotice.hidden = !state.enabled || !state.unread;
+      if (orbNotice) orbNotice.hidden = !state.unread;
       if (noticeSummary) noticeSummary.textContent = !state.enabled ? "自动检查已关闭" : state.error ? "更新失败 · 点击查看" : state.unread ? `${state.unread} 条新公告 · 账户待确认` : state.loading ? "正在检查公告…" : state.records?.length ? "查看公告与账户状态 ›" : "暂无新动态 ›";
       const presentation = window.noticePresentation(state, now());
       if (probabilityTag) {
@@ -407,9 +438,8 @@
     });
     const unsubscribeEdgeHidden = api.subscribeEdgeHidden(renderEdgeHidden);
     const unsubscribeOpenDetails = api.subscribeOpenDetails?.((target) => {
-      interaction = "pinned";
-      renderInteraction();
       if (target === "credits") onReset();
+      else openQuotaDetails();
     });
     const clockTimer = window.setInterval?.(() => {
       if (latestState) renderState(latestState);
@@ -422,6 +452,10 @@
       unsubscribeOpenDetails?.();
       unsubscribeNotices?.();
       noticesButton?.removeEventListener("click", onNotices);
+      orbNotice?.removeEventListener('click', onNotices);
+      orbLow?.removeEventListener('click', openQuotaDetails);
+      orbRecovered?.removeEventListener('click', openQuotaDetails);
+      orbExpiring?.removeEventListener('click', onReset);
       probabilityTag?.removeEventListener("click", onNotices);
       probabilityPanel?.removeEventListener("click", onNotices);
       window.clearInterval?.(clockTimer);

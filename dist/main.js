@@ -141,14 +141,12 @@ function startCompanion(deps = loadElectronDeps()) {
     let regions = [{ x: 12, y: 12, width: 76, height: 76, radius: 38 }];
     let normalDockY;
     let alerts;
-    let openNotification;
     let history;
     let trendsWindow;
     let notices;
     let noticesWindow;
     let autoStart;
     let changingAutoStart = false;
-    const notifications = new Set();
     const stopResources = () => {
         if (resourcesStopped)
             return;
@@ -157,8 +155,6 @@ function startCompanion(deps = loadElectronDeps()) {
         tray = undefined;
         controller.stop();
         notices?.stop();
-        for (const notification of notifications) notification.close?.();
-        notifications.clear();
         if (dragTimer)
             clearInterval(dragTimer);
         if (onDisplayChanged) {
@@ -180,24 +176,6 @@ function startCompanion(deps = loadElectronDeps()) {
         latestState = result ? { ...state, alerts: result.alerts } : state;
         notices?.updateAccount(state);
         sendToWindow(window, 'quota:state', latestState);
-        if (deps.Notification?.isSupported()) {
-            for (const message of result?.notifications ?? []) {
-                try {
-                    const notification = new deps.Notification({
-                        title: message.title, body: message.body, silent: true,
-                        icon: node_path_1.default.join(__dirname, '..', 'assets', `alert-${message.kind}.png`),
-                    });
-                    notifications.add(notification);
-                    notification.on('click', () => openNotification?.(message.target));
-                    notification.on('close', () => notifications.delete(notification));
-                    notification.on('failed', () => notifications.delete(notification));
-                    notification.show();
-                }
-                catch {
-                    // Windows notifications are optional; keep quota updates working.
-                }
-            }
-        }
     });
     const requestReset = registerQuotaActions(deps.ipcMain, controller, deps.dialog, () => window);
     deps.app.on('before-quit', stopResources);
@@ -225,6 +203,11 @@ function startCompanion(deps = loadElectronDeps()) {
         alerts = new QuotaAlerts(savedAlerts, (saved) => {
             try { (0, node_fs_1.writeFileSync)(alertsPath, JSON.stringify(saved), 'utf8'); } catch {}
         });
+        deps.ipcMain.handle('quota:dismiss-alert', (_event, category) => {
+            if (!['quota', 'credits'].includes(category) || !latestState) return;
+            latestState = { ...latestState, alerts: alerts.dismiss(category) };
+            sendToWindow(window, 'quota:state', latestState);
+        });
         const showNotices = () => {
             if (noticesWindow && !noticesWindow.isDestroyed()) {
                 if (noticesWindow.isMinimized()) noticesWindow.restore();
@@ -246,18 +229,6 @@ function startCompanion(deps = loadElectronDeps()) {
             onChange: (state) => {
                 sendToWindow(window, 'quota:notices', state);
                 sendToWindow(noticesWindow, 'quota:notices', state);
-            },
-            onNotice: (record) => {
-                if (!alerts.saved.enabled || !deps.Notification?.isSupported()) return;
-                try {
-                    const label = record.kind === 'banked' ? '重置卡' : record.kind === 'limits' ? '额度上限调整' : '额度重置';
-                    const notification = new deps.Notification({ title: `收到${label}公告`, body: 'Tibo 原帖已核验，账户生效情况待确认。点击查看。', silent: true });
-                    notifications.add(notification);
-                    notification.on('click', showNotices);
-                    notification.on('close', () => notifications.delete(notification));
-                    notification.on('failed', () => notifications.delete(notification));
-                    notification.show();
-                } catch { /* The in-app unread badge still works without desktop notifications. */ }
             },
         });
         deps.ipcMain.handle('quota:open-notices', showNotices);
@@ -308,9 +279,9 @@ function startCompanion(deps = loadElectronDeps()) {
         const moveDockedWindow = (workArea, screenY, pointerOffsetY) => {
             if (!window)
                 return;
-            const requestedNormalY = screenY - pointerOffsetY - (windowLayout === 'collapsed' ? 8 : 0);
+            const requestedNormalY = screenY - pointerOffsetY - ((windowLayout === 'collapsed' || windowLayout === 'summary') ? 8 : 0);
             const bounds = (0, window_position_1.rightDockBounds)(workArea, windowLayout, requestedNormalY, contentHeight);
-            normalDockY = bounds.y - (windowLayout === 'collapsed' ? 8 : 0);
+            normalDockY = bounds.y - ((windowLayout === 'collapsed' || windowLayout === 'summary') ? 8 : 0);
             applyLayout(workArea);
             saveDockY(dockPath, normalDockY);
         };
@@ -326,19 +297,13 @@ function startCompanion(deps = loadElectronDeps()) {
             applyLayout();
             sendToWindow(window, 'quota:edge-hidden', hidden);
         };
-        openNotification = (target) => {
-            setEdgeHidden(false);
-            window?.show?.();
-            window?.focus?.();
-            sendToWindow(window, 'quota:open-details', target);
-        };
         deps.ipcMain.handle('quota:set-edge-hidden', (...args) => {
             const hidden = args[1];
             if (typeof hidden === 'boolean')
                 setEdgeHidden(hidden);
         });
         deps.ipcMain.handle('quota:set-layout', (_event, layout) => {
-            if (!window || !layout || !['collapsed', 'normal', 'picker'].includes(layout.mode) || windowLayout === 'edgeHidden')
+            if (!window || !layout || !['collapsed', 'summary', 'normal', 'picker'].includes(layout.mode) || windowLayout === 'edgeHidden')
                 return;
             if (!Number.isFinite(layout.height) || layout.height < 100 || layout.height > 1000 || !Array.isArray(layout.regions) || layout.regions.length < 1 || layout.regions.length > 7)
                 return;
@@ -382,9 +347,9 @@ function startCompanion(deps = loadElectronDeps()) {
                 return;
             event?.preventDefault?.();
             const workArea = workAreaFor(newBounds);
-            const requestedNormalY = windowLayout === 'normal' || windowLayout === 'picker' ? newBounds.y : windowLayout === 'collapsed' ? newBounds.y - 8 : normalDockY;
+            const requestedNormalY = windowLayout === 'normal' || windowLayout === 'picker' ? newBounds.y : (windowLayout === 'collapsed' || windowLayout === 'summary') ? newBounds.y - 8 : normalDockY;
             const bounds = (0, window_position_1.rightDockBounds)(workArea, windowLayout, requestedNormalY, contentHeight);
-            normalDockY = bounds.y - (windowLayout === 'collapsed' ? 8 : windowLayout === 'edgeHidden' ? 30 : 0);
+            normalDockY = bounds.y - ((windowLayout === 'collapsed' || windowLayout === 'summary') ? 8 : windowLayout === 'edgeHidden' ? 30 : 0);
             applyLayout(workArea);
             if (windowLayout !== 'edgeHidden')
                 saveDockY(dockPath, normalDockY);
@@ -415,8 +380,6 @@ function startCompanion(deps = loadElectronDeps()) {
                 onQuit: quit,
                 isRefreshing: () => refreshing,
                 canReset: () => (latestState?.resetCredits?.availableCount ?? 0) > 0 && latestState?.isResetting === false,
-                notificationsEnabled: alerts.saved.enabled,
-                onToggleNotifications: () => { alerts.setEnabled(!alerts.saved.enabled); updateTrayMenu(); },
                 onTrends: showTrends,
                 autoStartEnabled: autoStart?.enabled === true,
                 autoStartAvailable: !!autoStart && !changingAutoStart,
@@ -435,8 +398,6 @@ function startCompanion(deps = loadElectronDeps()) {
                 window?.focus?.();
             },
             onQuit: quit,
-            notificationsEnabled: alerts.saved.enabled,
-            onToggleNotifications: () => { alerts.setEnabled(!alerts.saved.enabled); updateTrayMenu(); },
             onTrends: showTrends,
             autoStartEnabled: autoStart?.enabled === true,
             autoStartAvailable: !!autoStart && !changingAutoStart,

@@ -12,16 +12,18 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-alerts-test-'));
 app.setPath('userData', profile);
 const now = Date.now();
 const hour = 3600000;
-const fixture = (remaining, credits = []) => ({
+const fixture = (remaining, credits = [], weekly = 68) => ({
   rateLimits: {
     primary: { usedPercent: 100 - remaining, windowDurationMins: 300, resetsAt: (now + hour) / 1000 },
-    secondary: { usedPercent: 32, windowDurationMins: 10080, resetsAt: (now + 6 * 24 * hour) / 1000 },
+    secondary: { usedPercent: 100 - weekly, windowDurationMins: 10080, resetsAt: (now + 6 * 24 * hour) / 1000 },
   },
   rateLimitResetCredits: { availableCount: credits.length, credits },
 });
 let current = fixture(19);
 let consumption = 0;
-AppServerClient.prototype.readRateLimits = async () => current;
+let fail = false, push;
+AppServerClient.prototype.onRateLimitsUpdated = listener => { push = listener; return () => {}; };
+AppServerClient.prototype.readRateLimits = async () => { if (fail) throw Error('Offline fixture'); return current; };
 AppServerClient.prototype.consumeRateLimitResetCredit = async () => { consumption++; throw new Error('Consumption is forbidden'); };
 const notifications = [];
 const handlers = new Map();
@@ -40,7 +42,7 @@ startCompanion({
   BrowserWindow: class extends BrowserWindow {
     constructor(options) { super({ ...options, show: false }); quotaWindow = this; }
     setShape(value) { shape = value; super.setShape(value); }
-    show() {} // Notification activation is tested without interrupting the user's desktop.
+    show() {} // Keep offline checks from interrupting the user's desktop.
     focus() {}
   },
   Tray: class { setToolTip() {} setContextMenu(menu) { trayMenu = menu; } destroy() {} },
@@ -68,58 +70,76 @@ const save = async (name) => {
   await app.whenReady();
   await waitFor(() => quotaWindow && !quotaWindow.webContents.isLoading(), 'renderer');
   await waitFor(async () => !await isHidden('[data-orb-low]'), 'initial low badge');
-  assert.equal(notifications.length, 1);
-  assert.match(notifications[0].options.title, /额度偏低/);
-  assert.equal(await isHidden('[data-orb-expiring]'), true);
-  notifications[0].emit('click');
-  await waitFor(() => evaluate(`document.querySelector('[data-quota-app]').classList.contains('is-pinned')`), 'notification opens details');
+  const color = selector => evaluate(`getComputedStyle(document.querySelector('${selector}')).backgroundColor`);
+  assert.equal(await color('[data-orb-low]'), 'rgb(250, 204, 21)');
+  assert.equal(await isHidden('[data-alert-summary]'), false);
+  assert.ok(Math.abs(quotaWindow.getBounds().width - 286) <= 2, 'summary width respects native DPI rounding');
   await save('01-low');
+  push(fixture(18).rateLimits);
+  await rendered();
+  assert.equal(await isHidden('[data-orb-low]'), false, 'push retains pending badge');
+  fail = true;
+  await handlers.get('quota:refresh-now')(); await rendered();
+  assert.equal(await isHidden('[data-orb-low]'), false, 'failed refresh retains pending badge');
+  assert.match(await evaluate(`document.querySelector('[data-alert-summary]').textContent`), /更新失败/);
+  fail = false;
   await refresh(fixture(18));
-  assert.equal(notifications.length, 1);
+  assert.equal(await isHidden('[data-orb-low]'), true, 'next full refresh clears old threshold');
+  assert.equal(await isHidden('[data-alert-summary]'), true);
+  await refresh(fixture(8));
+  assert.equal(await color('[data-orb-low]'), 'rgb(251, 146, 60)');
   await refresh(fixture(0));
-  assert.equal(notifications.length, 2);
+  assert.equal(await color('[data-orb-low]'), 'rgb(248, 113, 113)');
+  await refresh(fixture(100, [], 8));
+  assert.equal(await isHidden('[data-orb-recovered]'), true);
+  assert.equal(await color('[data-orb-low]'), 'rgb(251, 146, 60)');
+  assert.match(await evaluate(`document.querySelector('[data-alert-summary]').textContent`), /5 小时额度已恢复.*周额度.*8%/);
+  await save('02-partial-recovery');
+  await refresh(fixture(0, [], 68));
   await refresh(fixture(100));
-  assert.equal(notifications.length, 3);
-  assert.match(notifications.at(-1).options.title, /额度已恢复/);
   assert.equal(await isHidden('[data-orb-recovered]'), false);
   assert.equal(await isHidden('[data-orb-low]'), true);
-  await save('02-recovered');
+  assert.equal(await color('[data-orb-recovered]'), 'rgb(52, 211, 153)');
+  await save('03-recovered');
 
   const credits = [{ id: 'soon', status: 'available', expiresAt: (now + 18 * hour) / 1000 }];
-  await refresh(fixture(72, credits));
-  assert.match(notifications.at(-1).options.title, /重置卡即将过期/);
-  assert.equal(await isHidden('[data-orb-expiring]'), false);
-  await save('03-expiring');
-  notifications.at(-1).emit('click');
-  await waitFor(async () => !await isHidden('[data-credit-picker]'), 'expiry notification opens picker');
-  assert.equal(consumption, 0);
-  assert.match(await evaluate(`document.querySelector('.credit-expiring').textContent`), /即将过期/);
-  await save('04-picker');
-  await evaluate(`document.querySelector('[data-action="cancel-reset"]').click()`);
-  await refresh(fixture(19, credits));
+  await refresh(fixture(19, credits, 18));
   assert.equal(await isHidden('[data-orb-low]'), false);
   assert.equal(await isHidden('[data-orb-expiring]'), false);
-  assert.equal(await isHidden('[data-orb-recovered]'), true);
-  await save('05-combined');
-  for (const selector of ['[data-orb-low]', '[data-orb-expiring]']) {
-    const rect = await evaluate(`(() => {const r = document.querySelector('${selector}').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height };})()`);
+  await save('04-combined');
+  for (const selector of ['[data-orb-low]', '[data-orb-expiring]', '[data-alert-summary]']) {
+    const rect = await evaluate(`(() => { const r = document.querySelector('${selector}').getBoundingClientRect(); return { x:r.x,y:r.y,width:r.width,height:r.height }; })()`);
     const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
-    assert.ok(shape.some((r) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height), `${selector} must be inside native shape`);
+    assert.ok(shape.some(r => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height), `${selector} must be inside native shape`);
   }
-  const colors = await evaluate(`['[data-orb-low]', '[data-orb-recovered]', '[data-orb-expiring]'].map(s => getComputedStyle(document.querySelector(s)).backgroundColor)`);
-  assert.deepEqual(colors, ['rgb(250, 204, 21)', 'rgb(52, 211, 153)', 'rgb(249, 115, 22)']);
+  await evaluate(`document.querySelector('[data-orb-low]').click()`);
+  await waitFor(() => isHidden('[data-orb-low]'), 'quota acknowledged');
+  assert.equal(await isHidden('[data-orb-expiring]'), false, 'quota details leave credit reminder');
+  assert.equal(await isHidden('[data-alert-window="fiveHour"]'), false, 'underlying low state remains in details');
+  await evaluate(`document.querySelector('[data-orb-expiring]').click()`);
+  await waitFor(async () => !await isHidden('[data-credit-picker]'), 'credit badge opens picker');
+  await waitFor(() => isHidden('[data-orb-expiring]'), 'credit acknowledged');
+  assert.equal(consumption, 0);
+  assert.match(await evaluate(`document.querySelector('.credit-expiring').textContent`), /即将过期/);
+  await save('05-picker');
+  await evaluate(`document.querySelector('[data-action="cancel-reset"]').click()`);
+  const more = [...credits, { ...credits[0], id: 'second' }];
+  await refresh(fixture(8, more, 18));
+  assert.equal(await isHidden('[data-orb-low]'), false);
+  await evaluate(`document.querySelector('[data-orb-expiring]').click()`);
+  await waitFor(() => isHidden('[data-orb-expiring]'), 'second credit acknowledged');
+  assert.equal(await isHidden('[data-orb-low]'), false, 'credit details leave quota reminder');
+  await evaluate(`document.querySelector('[data-action="cancel-reset"]').click()`);
+  await refresh(fixture(8, more, 18));
+  assert.equal(await isHidden('[data-orb-low]'), true);
+  assert.equal(await isHidden('[data-orb-expiring]'), true);
+  assert.equal(await isHidden('[data-action="expiring-credits"]'), false, 'current card expiry stays in details');
   assert.equal(await evaluate(`document.querySelector('[data-details]').scrollWidth > document.querySelector('[data-details]').clientWidth`), false);
   const contentHeight = Math.ceil(await evaluate(`document.querySelector('[data-quota-app]').getBoundingClientRect().height`));
-  assert.ok(Math.abs(quotaWindow.getBounds().height - contentHeight) <= 1, 'native height matches content within fractional-DPI rounding');
-  trayMenu.find((item) => item.label === '桌面通知').click();
-  assert.equal(trayMenu.find((item) => item.label === '桌面通知').checked, false);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(profile, 'codex-quota-float-alerts.json'), 'utf8')).enabled, false);
-  const count = notifications.length;
-  await refresh(fixture(9, credits));
-  assert.equal(notifications.length, count);
-  await refresh(fixture(9, []));
-  assert.equal(await isHidden('[data-orb-expiring]'), true);
+  assert.ok(Math.abs(quotaWindow.getBounds().height - contentHeight) <= 2, `native height ${quotaWindow.getBounds().height}, content ${contentHeight}`);
+  assert.equal(trayMenu.some(item => item.label === '桌面通知'), false);
+  assert.equal(notifications.length, 0);
   assert.equal(consumption, 0);
-  console.log(JSON.stringify({ electronAlerts: 'passed', notifications: count, colors, cardConsumption: consumption }));
+  console.log(JSON.stringify({ electronAlerts: 'passed', notifications: 0, independentDismissal: true, cardConsumption: 0 }));
   app.quit();
-})().catch((error) => { console.error(error); app.exit(1); });
+})().catch(error => { console.error(error); app.exit(1); });

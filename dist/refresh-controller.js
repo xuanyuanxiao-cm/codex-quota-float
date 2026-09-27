@@ -72,6 +72,8 @@ class RefreshController {
         errorMessage: null,
     };
     timer;
+    nextFullReadAt;
+    refreshId = 0;
     inFlight;
     resetInFlight;
     unsubscribeUpdates;
@@ -99,11 +101,10 @@ class RefreshController {
             return this.inFlight;
         this.clearTimer();
         this.emit({ ...this.state, status: 'loading', errorMessage: null });
-        const request = this.readRateLimitsWithRetry();
-        const operation = request
-            .then((reading) => {
+        const request = this.readRateLimitsWithRetry((reading) => {
             if (!this.started)
                 return;
+            this.refreshId += 1;
             this.rawSnapshot = cloneSnapshot(reading.rateLimits);
             const views = (0, usage_model_1.normalizeRateLimits)(this.rawSnapshot);
             this.hasSnapshot = true;
@@ -117,8 +118,8 @@ class RefreshController {
                 lastManualResetAt: this.lastManualResetAt,
                 errorMessage: null,
             });
-        })
-            .catch(() => {
+        });
+        const operation = request.catch(() => {
             if (!this.started)
                 return;
             this.emit({
@@ -130,8 +131,10 @@ class RefreshController {
             .finally(() => {
             if (this.inFlight === operation)
                 this.inFlight = undefined;
-            if (this.started)
+            if (this.started) {
+                this.nextFullReadAt = this.now() + this.intervalMs;
                 this.scheduleTimer();
+            }
         });
         this.inFlight = operation;
         return operation;
@@ -188,6 +191,7 @@ class RefreshController {
     emit(state) {
         this.state = {
             ...state,
+            refreshId: this.refreshId,
             fiveHour: { ...state.fiveHour },
             weekly: { ...state.weekly },
             resetCredits: cloneResetCredits(state.resetCredits),
@@ -213,7 +217,7 @@ class RefreshController {
         });
         if (!this.inFlight) this.scheduleTimer();
     }
-    async readRateLimitsWithRetry() {
+    async readRateLimitsWithRetry(onReading) {
         let lastError = new Error('Unable to refresh rate limits');
         for (let attempt = 0; attempt <= this.retryDelaysMs.length; attempt += 1) {
             if (attempt > 0)
@@ -221,7 +225,14 @@ class RefreshController {
             if (!this.started)
                 throw new Error('RefreshController stopped');
             try {
-                return await this.client.readRateLimits();
+                let delivered = false;
+                const reading = await this.client.readRateLimits((value) => {
+                    delivered = true;
+                    onReading(value);
+                });
+                // Promise-only clients (including offline fixtures) remain supported.
+                if (!delivered) onReading(reading);
+                return reading;
             }
             catch (error) {
                 lastError = error;
@@ -234,7 +245,8 @@ class RefreshController {
         this.timer = setTimeout(() => {
             this.timer = undefined;
             void this.refreshNow();
-        }, nextRefreshDelay(this.state, this.now(), this.intervalMs));
+        }, Math.min(Math.max(0, (this.nextFullReadAt ?? this.now() + this.intervalMs) - this.now()),
+            nextRefreshDelay(this.state, this.now(), this.intervalMs)));
     }
     clearTimer() {
         if (this.timer !== undefined) {
