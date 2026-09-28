@@ -1,82 +1,123 @@
-# Codex Quota Float
+# Codex Quota Float · Codex 额度悬浮球
 
-A compact floating Codex quota monitor for Windows.
+把 Codex 剩余额度放在桌面一角：一眼查看额度、恢复时间和用量趋势，及时留意重置卡到期与重置动态。
 
-![Codex Quota Float preview](assets/preview-expanded.png)
+面向 **Windows** 的独立社区项目，使用 Electron 构建；不是 OpenAI 官方产品。当前版本 **0.1.17**。
 
-## Features
+![Codex 额度悬浮球：额度、趋势和提醒总览（离线示例数据）](assets/overview.png)
 
-- Detect the signed-in plan on every startup and quota refresh. Show only weekly quota when a successful reading supplies a weekly window without a five-hour window; connection failures preserve the last confirmed layout. Trends follow the same confirmed windows: weekly-only accounts hide historical five-hour curves, legends, hover values and recovery events, and automatic bounds use only weekly quota. Original history is retained and becomes visible again when the current account supplies both windows.
-- Reset messages: the single-line orb label shows the current verified event or `24h · XX%`. The cyan badge shows the number of unread related messages (99+ above 99). Opening, refreshing or restarting never acknowledges messages; use Mark read or Mark all read. Bulk acknowledgement applies only to the displayed revisions, leaving concurrent arrivals unread.
-- Community 24-hour reset estimates use the [Codex Reset Observatory](https://github.com/gussuri/codex-reset-observatory) public API. The target is an extra reset or banked-reset distribution, not a new announcement or this account receiving quota. This replaces the uncalibrated local historical-frequency calculation. Active announcements take precedence over percentages; completed community events remain explicitly attributed to the community unless their execution is confirmed by the original post. Accuracy has not been independently validated by this app.
-- Every 30 minutes, the main process requests the credential-free Codex Reset Observatory public API using Electron networking. Manual checks have a ten-minute minimum; after failures they can retry after 30 seconds, while automatic retry backs off to one hour. Unhealthy or six-hour-old forecasts are hidden; verified local event evidence remains available. This feed is not a complete Tibo timeline.
-- Original Tibo posts are verified on demand using Firecrawl v2 scrape with `FIRECRAWL_API_KEY` from the app environment; never bundle a key. At most two posts are checked per poll, with new messages ahead of historical backfill. Related questions, denials, rules and Codex service apologies are messages without being treated as reset promises. Unrelated posts do not notify. Unreadable pages retry with backoff up to seven days; network failures do not reject content. Missing verification configuration leaves community records visibly unverified. Reply context unavailable from the source is never invented.
-- History is retained without a 30-day/200-message deletion limit. The list defaults to the latest 30 days plus all unread messages, with an all-history filter and 50-row paging. Upgrade migration backs up version 2 and repairs the known September 27 missed teaser once. The bundled three-month archive is partial, source-linked and silent; summaries never masquerade as authenticated originals.
-- Account card inventories use hashed account identities and card IDs for persistent comparisons. First inventories establish a baseline, unavailable inventories preserve it, and observed new cards create one persistent unread record. Account changes reconnect the CLI; an in-flight read crossing an identity change is rejected. An unknown identity disables cross-read arrival detection.
-- Forecast snapshots preserve the original probability, upstream timestamp, observation time and model version when available. Only a subsequently observed, verified, broad completed event can establish a positive outcome. Missing or partial coverage remains unscorable rather than a false negative. No accuracy claim, local calibration, automatic card use or independent prediction model is added.
-- Local seven-day quota history with a default automatic view of the latest usage segment, plus fixed 24-hour / seven-day views. Thirty minutes of observed inactivity separates sessions. Recording interruptions of at least thirty minutes start a new segment without implying inactivity; shorter gaps remain within the segment. Automatic bounds fit the recorded duration with a small margin and a thirty-minute minimum, expand without shrinking during the same session, and keep the latest session visible while idle. All views preserve real elapsed time and gaps; sampling remains every five minutes.
-- Remaining-quota trends label the latest values, show 20% / 10% reference lines and before/after recovery values, and snap hover readings by screen distance without crossing gaps. Older series endpoints include their recording time when newer readings omit that window or the value is more than eleven minutes old. The displayed date range identifies historical sessions explicitly.
-- Follow Codex startup on Windows: the packaged app enables a hidden per-user watcher on first launch; it checks for a Codex desktop window every five seconds and starts the companion on the next opening. Toggle it in either context menu. Closing the companion manually does not immediately reopen it during the same Codex session.
-- The startup watcher checks the Codex installation path (including Store builds whose executable is named ChatGPT.exe), not Codex CLI processes. The portable version remembers its outer executable path; keep that file in a stable location or run it once again after moving it. Disabling the setting removes the startup shortcut and ends the watcher within five seconds.
-- Upper-right quota badge: yellow for remaining ≤20%, orange for ≤10%, red for exhaustion. Five-hour and weekly thresholds are tracked independently; the most urgent current state controls the shared badge and both windows appear in its text.
-- Confirmed exhausted-to-positive recovery uses a green check only when all existing windows are above 20%; another low or exhausted window keeps its warning color. Missing readings cannot claim full recovery.
-- Lower-right orange clock for available reset cards entering their final 24 hours; upper-left cyan numeric badge for unread related messages and observed new cards. The compact text panel disappears after 15 seconds or a successful refresh of the corresponding source, whichever occurs first. New threshold events, expiring cards and message revisions restart its timer; routine value changes and repeated unread records do not replay it.
-- Hovering the orb shows a separate native plain-text tooltip containing current low quota, valid expiring cards and the unread message count. It hides the transient panel while hovered without pausing its timer or marking messages read. Empty status uses the usual click-for-details hint. The native tooltip does not expand the companion window or its hit region.
-- Quota and card badges still clear on the next successful full refresh or when their respective details are opened. Text timeout does not dismiss badges. Push updates and failed reads do not dismiss them. New threshold events and new expiring cards may replace badges on that refresh. Current warnings and expiry dates remain in details and the orb tooltip.
-- Threshold and card deduplication survives restarts. Unread announcements remain until explicitly marked read, including when automatic checks are paused. No desktop notifications, notification settings, sounds, or automatic reminder windows. Card consumption still requires confirmation.
-- Refresh at upcoming quota reset, card-warning, and card-expiry boundaries, as well as the regular five-minute interval
-- Five-hour quota displayed as a blue inner ring
-- Weekly quota displayed as a purple outer ring
-- Separate remaining percentages divided by a white rule
-- Compact countdown and absolute reset-time display
-- Always-on-top floating panel with manual refresh and reset controls
-- Select a reset credit before confirming; the earliest-expiring available credit is preselected
-- Manual refresh reconnects after startup or connection failures
-- Each app-server request has a 15-second timeout; quota reads retain bounded retries, while reset consumption is never automatically replayed
-- Reset completion always triggers a fresh quota and reset-card read; a reset timeout reports an unconfirmed result and asks you to refresh
-- Window size follows the visible panel; blank corners and gaps are excluded from the native Windows hit region
-- Closing the floating window hides it to the tray and keeps quota and trend updates running. Choose Exit in either context menu to stop the app.
-- On short screens or at high display scaling, the details panel scrolls while the orb remains visible. The panel adapts when the display work area changes.
+[快速开始](#快速开始) · [功能介绍](#功能介绍) · [参与项目](#参与项目) · [开发与测试](#开发与测试)
 
-## Development
+## 功能介绍
 
-Install dependencies:
+### 额度和恢复时间，一眼看到
+
+- 蓝色内环表示 5 小时剩余额度，紫色外环表示每周剩余额度；中间分别显示百分比。
+- 点击悬浮球，查看倒计时、具体恢复时间、可用重置卡，并手动刷新。
+- 按当前账户实际返回的额度窗口显示；仅有周额度时，自动隐藏 5 小时额度及对应趋势。
+- 每 5 分钟定期刷新，并在额度恢复、卡片提醒和到期等时间点安排刷新。连接失败保留上次确认的布局，手动刷新可重新连接。
+
+<img src="assets/preview-expanded.png" alt="额度详情面板，当前版本离线示例数据" width="320">
+
+### 用量趋势，看清最近一段消耗
+
+- 本地保留 7 天额度记录，每 5 分钟采样；默认聚焦最近一段使用，也可切换到 24 小时或 7 天。
+- 显示最新剩余百分比、20% / 10% 参考线，以及额度恢复前后的数值。
+- 保留真实时间间隔；中断记录不会连成虚假的连续曲线。旧记录会注明记录时间。
+- 从首次成功读取开始积累，无法还原此前使用情况，也不估算 token 数或账单。
+
+![用量趋势：最近使用时段、恢复事件与记录间隔（离线示例数据）](assets/preview-trends.png)
+
+### 低额度、卡片到期和消息提醒
+
+| 提醒 | 含义 |
+| --- | --- |
+| 黄色 / 橙色 / 红色角标 | 剩余额度 ≤20% / ≤10% / 已耗尽，两个额度窗口分别判断 |
+| 绿色对勾 | 观察到耗尽后恢复，且当前所有已有额度窗口均高于 20% |
+| 橙色时钟 | 可用重置卡进入最后 24 小时 |
+| 青色数字 | 未读相关消息及观察到的新卡记录，超过 99 条显示 99+ |
+
+提醒使用悬浮球角标和短暂文字面板，没有系统桌面通知或声音。悬停可查看文字提示。消息须手动标为已读，打开、刷新或重启不会代为确认。使用重置卡前须选卡并确认，默认选中最快过期的可用卡，程序不会自动消耗卡片。
+
+![额度与卡片提醒示例](assets/preview-alerts.png)
+
+### 重置动态与社区预测
+
+- 汇总相关消息、原文来源及账户新卡记录，支持未读状态、历史筛选和分页。
+- 社区未来 24 小时估计来自 [Codex Reset Observatory](https://github.com/gussuri/codex-reset-observatory)，不是本项目独立训练的预测模型，也不代表你的账户一定会恢复额度。
+- 有有效预告时优先显示事件；失效或超过 6 小时的预测会隐藏。准确率未经本项目独立验证。
+- 社区数据默认每 30 分钟检查；手动检查通常至少间隔 10 分钟，失败后使用退避重试。
+- 原帖核验是可选功能，需要在启动应用的环境中设置 `FIRECRAWL_API_KEY`。未配置时保留明确的“未核验”状态；不应把社区摘要当成已核验原文。
+- 内置历史归档不完整，不能据此推断某段时间没有发生重置。详见[来源与覆盖范围](docs/reset-history-sources.md)。
+
+### 桌面使用
+
+- 置顶悬浮球、托盘驻留；关闭窗口会隐藏到托盘，右键菜单中的“退出”才会结束程序。
+- 安装包或便携版首次运行后，默认启用“跟随 Codex 启动”；可在右键菜单关闭。
+- 启动监视器每 5 秒检查 Codex 桌面窗口；在同一次 Codex 会话中手动退出悬浮球，不会立刻被重新拉起。
+- 便携版请放在固定目录；移动后重新运行一次，以更新启动路径。
+- 小屏幕或高缩放比例下详情面板可滚动；透明空白区域不拦截鼠标。
+
+## 快速开始
+
+目前可从源码运行或自行构建 Windows x64 安装包 / 便携版。
+
+1. 准备 Windows、Node.js 和 pnpm，并确保本机 Codex 已登录。
+2. 克隆仓库并安装依赖：
 
 ```powershell
+git clone https://github.com/xuanyuanxiao-cm/codex-quota-float.git
+cd codex-quota-float
 pnpm install
 ```
 
-Run tests:
+3. 启动：
 
 ```powershell
-pnpm test
+pnpm exec electron .
 ```
 
-Run the Windows/Electron layout and transparency test with offline quota fixtures:
+应用通过本机 `codex app-server --stdio` 读取额度。优先使用 `CODEX_CLI_PATH` 指定的可执行文件，其次查找 Codex 桌面应用的本地 CLI，最后尝试 PATH 中的 `codex` 命令。若提示连接失败，请确认本机登录状态及 CLI 路径，再点击刷新。
+
+可选路径配置（请替换为自己的实际路径）：
 
 ```powershell
-pnpm test:window
-pnpm test:window --force-device-scale-factor=1.25
-pnpm test:alerts
-pnpm test:trends
-pnpm test:notices
-pnpm test:regressions
+$env:CODEX_CLI_PATH = 'C:\path\to\codex.exe'
+pnpm exec electron .
 ```
 
-Add `--interactive` to open a checkerboard behind the companion for native click-through checks. These tests never connect to the quota service or consume reset cards.
+## 参与项目
 
-`test:regressions` checks scrolling at a 500-DIP work-area height, resizing back to a taller display, closing to tray, restoring the window, and shutdown cleanup. The unit suite also verifies quota responses while a child process writes a large volume of diagnostic output.
+欢迎一起把这个小工具做得更顺手。**不写代码也能参与。**
 
-All active unit tests use `node:test` in `test/`. The old compiled Vitest tests have been migrated or consolidated with current coverage; see [test migration notes](test/README.md).
+- **试用反馈**：报告连接、显示、缩放、多屏或托盘问题，附上版本号、复现步骤与去除个人信息后的截图。
+- **交互与设计**：反馈看不懂的提示、容易误点的入口，或给出更清楚的界面方案。
+- **代码与文档**：修复问题、补充使用说明和测试；较大的功能改动请先在 Issue 里讨论范围。
 
-The alert test uses a real Electron window with offline quota data. It checks badge colors, independent dismissal, refresh lifecycle, native hit regions, and the absence of desktop notifications, and saves actual UI previews in `release/alerts-preview/`.
+→ [提交问题或建议](https://github.com/xuanyuanxiao-cm/codex-quota-float/issues)
+→ [查看贡献说明](CONTRIBUTING.md)
 
-The trend test uses generated offline history to check automatic and fixed time ranges, gaps, recovery events, hover values, and the empty state. Real history starts with the first successful refresh; it cannot reconstruct earlier usage or estimate token counts / billing. Startup detection can be checked without registering anything using `powershell.exe -NoProfile -File dist/follow-codex.ps1 -Probe`.
+## 开发与测试
 
-Build the portable Windows executable:
+当前可运行实现位于 `dist/`，界面文件在 `dist/renderer/`，测试在 `test/`。
+
+```powershell
+pnpm test                 # Node.js 单元测试
+pnpm test:window          # 窗口布局、透明区域与账户显示
+pnpm test:alerts          # 提醒状态与角标生命周期
+pnpm test:trends          # 趋势范围、间隔与悬停读数
+pnpm test:notices         # 消息、核验与未读状态
+pnpm test:regressions     # 小屏滚动、托盘恢复与退出清理
+```
+
+Electron 界面测试使用离线示例数据，不连接额度服务、不消耗真实重置卡。截图输出到 `release/`。窗口测试支持 `--force-device-scale-factor=1.25`，也可添加 `--interactive` 手动检查透明区域的点击穿透。测试迁移说明见 [test/README.md](test/README.md)。
+
+构建 Windows x64 安装包和便携版：
 
 ```powershell
 pnpm build
 ```
 
-The portable executable and installer are generated in `release/` with the current version in their filenames.
+产物位于 `release/`，文件名包含当前版本号。额度请求有 15 秒超时和有限重试；消耗重置卡的请求不会自动重放，超时后需刷新确认结果。
+
+本页图片均由 **0.1.17 实际界面与离线演示数据**生成，不代表任何真实账户的额度或当前重置承诺。
