@@ -57,3 +57,6 @@ footer { margin-top: 14px; }
 #mark-read:disabled { border-color: transparent; background: transparent; }
 .values { font-size: 13px; }
 button:focus-visible, summary:focus-visible { outline: 2px solid #67e8e2; outline-offset: 3px; }
+.history-controls { margin: 12px 0; font-size: 12px; }
+.history-controls select { background: #172d42; border: 1px solid #36556d; border-radius: 6px; color: #dce7f4; padding: 6px; font: inherit; max-width: 100%; }
+#history-more { margin-top: 10px; }

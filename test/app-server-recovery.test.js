@@ -15,6 +15,7 @@ function setup(t, respond) {
   const children = [];
   const requests = [];
   const client = new AppServerClient({
+    getAccountKey: () => null,
     requestTimeoutMs: 100,
     spawnImpl() {
       const child = new EventEmitter();

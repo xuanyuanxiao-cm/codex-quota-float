@@ -156,7 +156,7 @@
         if (latestState?.alerts?.quotaBadge) messages.push(latestState.alerts.quotaBadge.text);
         const credits = (latestState?.alerts?.creditBadges ?? []).filter(c => c.expiresAt > now());
         if (credits.length) messages.push(`${credits.length} 张重置卡将在 24 小时内到期`);
-        if (latestNotices?.unread) messages.push(`${latestNotices.unread} 条新核验公告待查看`);
+        if (latestNotices?.unread) messages.push(`${latestNotices.unread} 条未读消息`);
         if (messages.length && ['stale', 'error'].includes(latestState?.status)) messages.push('更新失败，以上为最近一次数据');
         alertSummary.textContent = messages.join('\n');
         alertSummary.hidden = !messages.length || interaction !== 'collapsed' || edgeHidden || !creditPicker.hidden;
@@ -402,16 +402,23 @@
     orbLow?.addEventListener('click', openQuotaDetails);
     orbRecovered?.addEventListener('click', openQuotaDetails);
     orbExpiring?.addEventListener('click', onReset);
-    probabilityTag?.addEventListener("click", onNotices);
+    const onLabel = () => { void api.openNotices?.(window.noticePresentation(latestNotices || {}, now()).recordId); };
+    probabilityTag?.addEventListener("click", onLabel);
     probabilityPanel?.addEventListener("click", onNotices);
     const renderNotices = (state) => {
       latestNotices = state;
-      if (orbNotice) orbNotice.hidden = !state.unread;
-      if (noticeSummary) noticeSummary.textContent = !state.enabled ? "自动检查已关闭" : state.error ? "更新失败 · 点击查看" : state.unread ? `${state.unread} 条新公告 · 账户待确认` : state.loading ? "正在检查公告…" : state.records?.length ? "查看公告与账户状态 ›" : "暂无新动态 ›";
+      if (orbNotice) {
+        orbNotice.hidden = !state.unread;
+        orbNotice.textContent = state.unread > 99 ? '99+' : String(state.unread || 0);
+        orbNotice.setAttribute('aria-label', `${state.unread || 0} 条未读消息`);
+        orbNotice.title = `${state.unread || 0} 条未读消息，手动标记后清除`;
+      }
+      if (noticeSummary) noticeSummary.textContent = state.unread ? `${state.unread} 条未读消息 · 点击查看` : !state.enabled ? "自动检查已关闭" : state.error ? "更新失败 · 点击查看" : state.loading ? "正在检查消息…" : state.records?.length ? "查看消息与账户状态 ›" : "暂无新动态 ›";
       const presentation = window.noticePresentation(state, now());
       if (probabilityTag) {
         probabilityTag.hidden = state.showProbability !== true;
         probabilityTag.textContent = presentation.tag;
+        probabilityTag.dataset.tone = presentation.tone || 'neutral';
         probabilityTag.title = `${presentation.heading} · ${presentation.note}`;
       }
       const probabilityValue = root.querySelector('[data-probability-value]');
@@ -456,7 +463,7 @@
       orbLow?.removeEventListener('click', openQuotaDetails);
       orbRecovered?.removeEventListener('click', openQuotaDetails);
       orbExpiring?.removeEventListener('click', onReset);
-      probabilityTag?.removeEventListener("click", onNotices);
+      probabilityTag?.removeEventListener("click", onLabel);
       probabilityPanel?.removeEventListener("click", onNotices);
       window.clearInterval?.(clockTimer);
       resizeObserver.disconnect();

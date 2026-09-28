@@ -10,7 +10,7 @@ function setup(t) {
   const requests = [];
   child.stdin = { write: line => requests.push(JSON.parse(line)), end() { this.ended = true; } };
   child.kill = () => { child.killed = true; };
-  const client = new AppServerClient({ spawnImpl: () => child });
+  const client = new AppServerClient({ spawnImpl: () => child, getAccountKey: () => null });
   t.after(() => client.stop());
   const reply = message => child.stdout.emit('data', JSON.stringify(message) + '\n');
   return { client, child, requests, reply, async start() {
@@ -91,4 +91,11 @@ test('RPC errors reject requests and stop ends the child and rejects pending rea
   await s.client.stop(); await rejected;
   assert.equal(s.child.stdin.ended, true);
   assert.equal(s.child.killed, true);
+});
+test('a changed account during a read never applies another account snapshot', async t => {
+  const s = setup(t); let key = 'account-a'; s.client.getAccountKey = () => key;
+  await s.start(); let applied = false;
+  const pending = s.client.readRateLimits(() => { applied = true; });
+  key = 'account-b'; s.reply({ id: s.requests.at(-1).id, result: { rateLimits: {} } });
+  await assert.rejects(pending, /Account changed/); assert.equal(applied, false);
 });

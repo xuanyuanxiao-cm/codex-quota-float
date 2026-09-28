@@ -26,7 +26,9 @@ test('classifier separates announcements, completion, grants and unrelated expla
     assert.deepEqual(classifyPost("We've added a banked reset for all paid users."), { kind: 'banked', stage: 'completed' });
     assert.deepEqual(classifyPost("We'll send all paid users a banked reset."), { kind: 'banked', stage: 'announced' });
     assert.equal(classifyPost('We increased usage limits for Codex.').kind, 'limits');
-    for (const text of ['Banked resets expire after 30 days.', 'We will reset your password if you request it.', 'We will reset usage limits for Codex if the outage lasts.', 'We are not going to reset usage limits for Codex.', 'Will we reset usage limits for Codex?', 'We might send a banked reset to all paid users.']) assert.equal(classifyPost(text).kind, 'hint', text);
+    assert.equal(classifyPost('Banked resets expire after 30 days.').kind, 'limits');
+    assert.equal(classifyPost('We will reset your password if you request it.').kind, 'unrelated');
+    for (const text of ['We will reset usage limits for Codex if the outage lasts.', 'We are not going to reset usage limits for Codex.', 'Will we reset usage limits for Codex?', 'We might send a banked reset to all paid users.']) assert.equal(classifyPost(text).kind, 'hint', text);
 });
 test('first sync is silent; new posts notify once and reading does not change announcement state', async t => {
     const s = setup(t); await s.service.refresh(); assert.deepEqual(s.notified, []);
@@ -55,8 +57,9 @@ test('missing verification key does not block community data or claim local veri
 test('an original contradicting the community classification never becomes an announcement', async t => {
     const s = setup(t); s.service.scrapePage = async address => original(address.split('/').at(-1), 'Banked resets expire after 30 days.');
     await s.service.refresh(); assert.equal(s.service.view().activeNotice, null);
-    assert.equal(s.service.view().records[0].verificationStatus, 'rejected');
-    assert.equal(s.service.view().records[0].verified, false); assert.deepEqual(s.notified, []);
+    assert.equal(s.service.view().records[0].verificationStatus, 'verified');
+    assert.equal(s.service.view().records[0].kind, 'limits');
+    assert.equal(s.service.view().records[0].verified, true); assert.deepEqual(s.notified, []);
 });
 test('temporary verification failures retry after backoff without exhausting content attempts', async t => {
     const s = setup(t); let fail = true, attempts = 0;
@@ -120,11 +123,12 @@ test('pausing automatic checks does not cancel an explicit manual request', asyn
 test('network failure retains records but suppresses the forecast and backs off', async t => {
     const s = setup(t); await s.service.refresh(); s.advance(AUTO_INTERVAL); s.fail(true); await s.service.refresh();
     assert.equal(s.service.view().records.length, 1);
-    assert.equal(noticePresentation(s.service.view(), s.now()).value, '—');
+    assert.equal(noticePresentation(s.service.view(), s.now()).tag, '重置预告');
     assert.equal(s.service.view().nextCheckAt, s.now() + HOUR);
     const restarted = new ResetNotices(s.service.file, s.options); t.after(() => restarted.stop());
-    assert.equal(noticePresentation(restarted.view(), s.now()).value, '—', 'restart preserves failure state');
-    s.advance(31 * DAY); assert.equal(s.service.view().records.length, 0);
+    assert.equal(noticePresentation(restarted.view(), s.now()).tag, '重置预告', 'local evidence survives a feed failure');
+    s.advance(31 * DAY); assert.equal(s.service.view().records.length, 1);
+    assert.equal(noticePresentation(s.service.view(), s.now()).value, '—');
 });
 test('a locally verified limit adjustment overrides an incorrect community reset classification', async t => {
     const s = setup(t); s.service.scrapePage = async address => original(address.split('/').at(-1), 'We increased usage limits for Codex.');
@@ -146,11 +150,11 @@ test('legacy migration preserves preferences and history without trusting old cl
 });
 test('card arrival uses new IDs, never first reads, missing readings or stale responses', t => {
     const s = setup(t);
-    const state = (ids, remaining = 20) => ({ status: 'ready', planType: 'pro', fiveHour: { remainingPercent: remaining }, weekly: { remainingPercent: 50 }, lastUpdatedAt: NOW,
+    const state = (ids, remaining = 20) => ({ status: 'ready', accountKey: 'account-test', planType: 'pro', fiveHour: { remainingPercent: remaining }, weekly: { remainingPercent: 50 }, lastUpdatedAt: NOW,
         resetCredits: ids ? { credits: ids.map(id => ({ id, status: 'available', expiresAt: (NOW + DAY) / 1000 })) } : null });
     s.service.updateAccount(state(['a'])); assert.equal(s.service.view().cardArrival, null);
     s.service.updateAccount({ ...state(['a', 'b']), status: 'error' }); assert.equal(s.service.view().cardArrival, null);
-    s.service.updateAccount(state(null)); s.service.updateAccount(state(['a', 'b'])); assert.equal(s.service.view().cardArrival, null);
+    s.service.updateAccount(state(null)); s.service.updateAccount(state(['a', 'b'])); assert.equal(s.service.view().cardArrival.count, 1);
     s.service.updateAccount(state(['b', 'c'])); assert.equal(s.service.view().cardArrival.count, 1);
     assert.equal(s.service.view().account.fiveHour, 20); assert.deepEqual(s.service.view().recoveries, {});
 });
@@ -197,15 +201,15 @@ test('translation failures are bounded and leave verified originals usable', asy
     assert.equal(record.chineseText, undefined);
 });
 
-test('changed source content removes an obsolete translation', async t => {
+test('a changed community summary does not erase a verified original or its translation', async t => {
     const s = setup(t);
     s.service.scrapePage = async address => ({ html: original(address.split('/').at(-1)), translation: { originalText: postText, chineseText: '我们将重置额度。' } });
     await s.service.refresh(); assert.ok(s.service.view().records[0].chineseText);
     s.advance(AUTO_INTERVAL);
     s.items([{ id: '12345678901', time: NOW - HOUR, text: 'Edited post' }]);
     s.service.canVerify = () => false; await s.service.refresh();
-    assert.equal(s.service.view().records[0].chineseText, null);
-    assert.equal(s.service.view().records[0].originalText, null);
+    assert.equal(s.service.view().records[0].chineseText, '我们将重置额度。');
+    assert.equal(s.service.view().records[0].originalText, postText);
 });
 
 test('automatic checks wait thirty minutes while manual checks remain available after ten', async t => {

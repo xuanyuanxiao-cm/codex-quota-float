@@ -8,6 +8,7 @@ exports.resolveAppServerCommand = resolveAppServerCommand;
 const node_child_process_1 = require("node:child_process");
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
+const { readAccountKey } = require('./account-identity');
 const node_path_1 = __importDefault(require("node:path"));
 const DEFAULT_COMMAND = 'codex';
 const DEFAULT_ARGS = ['app-server', '--stdio'];
@@ -68,6 +69,7 @@ class AppServerClient {
     startPromise;
     initialized = false;
     constructor(options) {
+        this.getAccountKey = options?.getAccountKey ?? readAccountKey;
         this.command = options?.command ?? process.env.CODEX_QUOTA_FLOAT_APP_SERVER_COMMAND ?? resolveAppServerCommand();
         this.args = [...(options?.args ?? DEFAULT_ARGS)];
         this.spawnImpl = options?.spawnImpl ?? defaultSpawn;
@@ -114,14 +116,19 @@ class AppServerClient {
         }
     }
     async readRateLimits(onReading) {
+        const accountKey = this.getAccountKey();
+        if (this.initialized && this.lastAccountKey !== undefined && accountKey !== this.lastAccountKey) await this.stop();
         if (!this.initialized || !this.child) {
             await this.start();
         }
+        this.lastAccountKey = accountKey;
         return this.sendRequest('account/rateLimits/read', undefined, (result) => {
+            if (accountKey !== this.getAccountKey()) throw new Error('Account changed during quota read');
             if (!isRecord(result) || !('rateLimits' in result)) {
                 throw new Error('Invalid rate limits response');
             }
             const reading = {
+                ...(accountKey ? { accountKey } : {}),
                 rateLimits: result.rateLimits,
                 rateLimitResetCredits: isRecord(result.rateLimitResetCredits)
                     ? result.rateLimitResetCredits
@@ -236,6 +243,7 @@ class AppServerClient {
         if (!isRecord(snapshot)) {
             return;
         }
+        if (this.lastAccountKey !== undefined && this.lastAccountKey !== this.getAccountKey()) return;
         for (const listener of this.listeners) {
             listener(snapshot);
         }

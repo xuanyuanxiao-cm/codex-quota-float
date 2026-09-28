@@ -208,10 +208,11 @@ function startCompanion(deps = loadElectronDeps()) {
             latestState = { ...latestState, alerts: alerts.dismiss(category) };
             sendToWindow(window, 'quota:state', latestState);
         });
-        const showNotices = () => {
+        const showNotices = (_event, id) => {
+            const select = () => { if (typeof id === 'string') sendToWindow(noticesWindow, 'quota:select-notice', id); };
             if (noticesWindow && !noticesWindow.isDestroyed()) {
                 if (noticesWindow.isMinimized()) noticesWindow.restore();
-                noticesWindow.show(); noticesWindow.focus(); return;
+                noticesWindow.show(); noticesWindow.focus(); select(); return;
             }
             noticesWindow = new deps.BrowserWindow({
                 width: 470, height: 720, minWidth: 380, minHeight: 440,
@@ -220,6 +221,7 @@ function startCompanion(deps = loadElectronDeps()) {
                 webPreferences: { preload: node_path_1.default.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
             });
             noticesWindow.on('closed', () => { noticesWindow = undefined; });
+            noticesWindow.webContents.on?.('did-finish-load', select);
             void noticesWindow.loadFile(node_path_1.default.join(__dirname, 'renderer', 'notices.html'));
         };
         notices = new ResetNotices(node_path_1.default.join(deps.app.getPath('userData'), 'codex-reset-notices.json'), {
@@ -231,10 +233,12 @@ function startCompanion(deps = loadElectronDeps()) {
                 sendToWindow(noticesWindow, 'quota:notices', state);
             },
         });
+        if (deps.app.isPackaged) notices.importArchive(require('./reset-history-seed.json'));
         deps.ipcMain.handle('quota:open-notices', showNotices);
         deps.ipcMain.handle('quota:read-notices', () => notices.view());
         deps.ipcMain.handle('quota:refresh-notices', () => notices.refresh(true));
         deps.ipcMain.handle('quota:read-notice', (_event, id) => notices.markRead(id));
+        deps.ipcMain.handle('quota:read-notices-batch', (_event, items) => notices.markReadBatch(items));
         deps.ipcMain.handle('quota:show-probability', (_event, show) => {
             if (typeof show === 'boolean') return notices.setShowProbability(show);
         });

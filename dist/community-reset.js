@@ -15,22 +15,28 @@ function parseCommunity(data, now = Date.now()) {
     const records = new Map();
     const add = (url, date, text, kind, stage) => {
         url = postUrl(url); const publishedAt = Date.parse(date);
-        if (!url || !Number.isFinite(publishedAt) || publishedAt > now + 60000 || publishedAt < now - 30 * 86400000) return null;
+        if (!url || !Number.isFinite(publishedAt) || publishedAt > now + 60000) return null;
         const id = url.split('/').at(-1);
-        const record = { id, url, publishedAt, text: typeof text === 'string' ? text.slice(0, 5000) : '', kind, stage, verified: false, source: 'community' };
+        const record = { ...records.get(id), id, url, publishedAt, text: typeof text === 'string' ? text.slice(0, 5000) : '', kind, stage, verified: false, source: 'community' };
         records.set(id, record); return record;
     };
     const history = Array.isArray(data.viewModel.recentHistory) ? data.viewModel.recentHistory : [];
     let completed = null;
-    for (const row of history.slice(0, 200)) {
+    for (const row of history) {
         if (!['confirmed_global', 'banked_distribution'].includes(row?.recordKind)) continue;
         const kind = row.recordKind === 'banked_distribution' ? 'banked' : 'reset';
         const record = add(row.source, row.signalAt || row.date, row.summary, kind, 'completed');
         const at = Date.parse(row.resetAt || row.date);
+        if (record) {
+            record.eventId = typeof (row.eventKey || row.key) === 'string' ? row.eventKey || row.key : record.id;
+            record.communityCompletedAt = Number.isFinite(at) ? at : null;
+            record.scope = typeof row.scope === 'string' ? row.scope : null;
+            record.outcomeScope = /replacement|affected|failed|targeted|补发|受影响/i.test(record.text) ? 'targeted' : kind === 'reset' ? 'broad' : /all paid|all users|everyone|全.*(?:付费|用户)/i.test(record.text) ? 'broad' : 'unknown';
+        }
         if (record && Number.isFinite(at) && at <= now && now - at < 86400000 && (!completed || at > completed.at)) completed = { id: record.id, kind, stage: 'completed', at };
     }
     const activity = data.latestTiboActivity;
-    if (activity && ['official_notice', 'reset_completed', 'banked_reset', 'limit_increase', 'teaser'].includes(activity.classification)) {
+    if (activity) {
         const previous = records.get(postUrl(activity.sourceUrl)?.split('/').at(-1));
         add(activity.sourceUrl, activity.createdAt, activity.text, previous?.kind || 'hint', previous?.stage || 'hint');
     }
@@ -42,7 +48,9 @@ function parseCommunity(data, now = Date.now()) {
         const record = add(window.source, window.openedAt, previous?.text || window.summary, kind, 'announced');
         if (record) active = { id: record.id, kind, stage: 'announced', at: record.publishedAt };
     }
-    return { asOf, healthy, percent: typeof probability === 'number' && Number.isFinite(probability) && probability >= 0 && probability <= 1 ? Math.round(probability * 100) : null,
+    const validProbability = typeof probability === 'number' && Number.isFinite(probability) && probability >= 0 && probability <= 1;
+    return { asOf, healthy, probability: validProbability ? probability : null, modelVersion: typeof data.viewModel.modelVersion === 'string' ? data.viewModel.modelVersion : null,
+        percent: validProbability ? Math.round(probability * 100) : null,
         active, records: [...records.values()].sort((a, b) => b.publishedAt - a.publishedAt) };
 }
 async function fetchCommunity({ fetchImpl = fetch, signal } = {}) {

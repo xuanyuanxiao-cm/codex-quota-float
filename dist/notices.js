@@ -1,5 +1,8 @@
 'use strict';
 const fs = require('node:fs');
+const { classifyPost, messagePriority, explicitDeadline } = require('./notice-rules');
+const { recordForecast, forecastSummary } = require('./forecast-journal');
+const { createHash } = require('node:crypto');
 const { fetchCommunity, parseCommunity, postUrl, INTERVAL, MAX_AGE } = require('./community-reset');
 const HOUR = 3600000;
 const DAY = 24 * HOUR;
@@ -9,26 +12,6 @@ function plain(html) {
         ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'", '&#39;': "'", '&nbsp;': ' ' })[s])
         .replace(/&#(\d+);/g, (_, n) => Number(n) <= 0x10ffff ? String.fromCodePoint(Number(n)) : '')
         .replace(/\s+/g, ' ').trim();
-}
-function classifyPost(value) {
-    const text = value.replace(/’/g, "'");
-    const hint = { kind: 'hint', stage: 'hint' };
-    if (!/\breset|usage limits|rate limits/i.test(text)) return hint;
-    // Policies, questions, conditions and negations are not affirmative announcements.
-    if (/\?|\b(?:if|unless|might|maybe|could|would|not|never|won't|isn't|aren't|cannot|can't|usually|typically)\b|\b(?:we can|how to|every (?:day|week|month))\b|\bno\s+(?:\w+\s+){0,3}resets?\b/i.test(text)) return hint;
-    const banked = /\bbanked resets?\b/i.test(text);
-    if (!/\bcodex\b|\bchatgpt\b/i.test(text) && !banked) return hint;
-    if (banked) {
-        if (!/\b(?:we(?:'ll|'ve|'re| will| have| are)?|everyone|all (?:paid )?users|paid users)\b/i.test(text)) return hint;
-        if (!/\b(?:give|giving|given|gave|grant\w*|send|sending|sent|add\w*|issu\w*|distribut\w*|receiv\w*)\b.{0,65}\bbanked resets?\b|\bbanked resets?\b.{0,65}\b(?:sent|added|granted|distributed|issued)\b/i.test(text)) return hint;
-        return { kind: 'banked', stage: /\b(?:will|we'll|going to|giving|sending|issuing|distributing)\b/i.test(text) ? 'announced' : 'completed' };
-    }
-    if (!/\breset/i.test(text) && /\bwe\b/i.test(text) && /(?:doubl|increas|rais)\w*.{0,50}(?:limits|usage)|(?:limits|usage).{0,30}(?:doubl|increas)/i.test(text)) return { kind: 'limits', stage: 'announced' };
-    if (!/\b(?:usage|rate) limits\b|\bquota\b/i.test(text)) return hint;
-    if (/\bwe(?:'ll| will| are| have|'re|'ve)?\b.{0,65}\breset\w*.{0,40}(?:(?:usage|rate) limits|quota)|(?:limits|quota).{0,40}\b(?:have been|has been|were|was|are) reset\b/i.test(text)) {
-        return { kind: 'reset', stage: /\b(?:will|we'll|going to|resetting)\b/i.test(text) ? 'announced' : 'completed' };
-    }
-    return hint;
 }
 function classify(text) { return classifyPost(text).kind; }
 function originalPost(html, url) {
@@ -65,26 +48,47 @@ class ResetNotices {
     constructor(file, { loadCommunity = fetchCommunity, scrapePage = scrape, canVerify = () => Boolean(process.env.FIRECRAWL_API_KEY), now = Date.now, onChange = () => {}, onNotice = () => {} } = {}) {
         this.file = file; this.loadCommunity = loadCommunity; this.scrapePage = scrapePage; this.canVerify = canVerify;
         this.now = now; this.onChange = onChange; this.onNotice = onNotice;
-        this.saved = { version: 2, enabled: true, showProbability: true, initialized: false, lastAttemptAt: null, lastSuccessAt: null, records: [], community: null };
+        this.saved = { version: 3, enabled: true, showProbability: true, initialized: false, lastAttemptAt: null, lastSuccessAt: null, records: [], community: null, accountBaselines: {}, forecasts: [] };
         try {
             const old = JSON.parse(fs.readFileSync(file, 'utf8'));
             for (const key of ['enabled', 'showProbability']) if (typeof old[key] === 'boolean') this.saved[key] = old[key];
-            if (old.version === 2) Object.assign(this.saved, old);
-            else this.saved.records = (Array.isArray(old.records) ? old.records : []).map(r => ({ ...r, verified: false, read: true, kind: 'hint', stage: 'hint', source: 'legacy', verificationAttempts: 0 }));
-        } catch {}
-        this.saved.records = (Array.isArray(this.saved.records) ? this.saved.records : []).filter(r => r && postUrl(r.url) && r.id === r.url.split('/').at(-1) && typeof r.text === 'string').map(r => ({ ...r, text: r.text.slice(0, 5000) }));
+            if (old.version >= 2) Object.assign(this.saved, old);
+            else { this.saved.version = 1; this.saved.records = (Array.isArray(old.records) ? old.records : []).map(r => ({ ...r, verified: false, read: true, kind: 'hint', stage: 'hint', source: 'legacy', verificationAttempts: 0 })); }
+        } catch (error) { if (error.code !== 'ENOENT') this.migrationError = '无法读取公告存档，已保留原文件；请检查数据目录'; }
+        this.saved.records = (Array.isArray(this.saved.records) ? this.saved.records : []).filter(r => r && (r.kind === 'arrival' || postUrl(r.url) && r.id === r.url.split('/').at(-1)) && typeof r.text === 'string').map(r => ({ ...r, revision: r.revision || 1, text: r.text.slice(0, 5000) }));
+        if (this.saved.version !== 3) {
+            try { fs.copyFileSync(file, file + '.pre-v3.bak', fs.constants.COPYFILE_EXCL); } catch (error) { if (error.code !== 'EEXIST') this.migrationError = '升级前备份失败，请检查数据目录'; }
+            for (const r of this.saved.records) {
+                // Rejected originals were authenticated by the old extractor, only their classification failed.
+                if (r.originalText && r.verifiedAt) {
+                    Object.assign(r, classifyPost(r.originalText), { verified: true, verificationStatus: 'verified' });
+                    r.deadlineAt = r.deadlineAt || explicitDeadline(r.originalText);
+                    if (r.id === '2103963215885701493' && r.eligible && !r.manualReadAt && r.kind === 'reset') { r.read = false; r.processingReason = '修复 9 月 27 日已知漏报'; }
+                } else if (r.source === 'legacy') Object.assign(r, classifyPost(r.text));
+                if (r.kind === 'unrelated') r.read = true;
+            }
+            this.saved.version = 3;
+        }
         this.error = this.saved.failures > 0 ? '社区上次更新失败，请稍后重试' : null;
         this.loading = false; this.account = null; this.recoveries = {}; this.cardArrival = null;
         this.prune();
+        if (this.migrationError) this.error = this.migrationError;
     }
     prune() {
-        this.saved.records = this.saved.records.filter(r => Number.isFinite(r.publishedAt) && r.publishedAt >= this.now() - 30 * DAY && r.publishedAt <= this.now() + 60000)
-            .sort((a, b) => b.publishedAt - a.publishedAt).slice(0, 200);
+        this.saved.records = this.saved.records.filter(r => Number.isFinite(r.publishedAt) && r.publishedAt <= this.now() + 60000)
+            .sort((a, b) => b.publishedAt - a.publishedAt);
     }
     persist() {
         this.prune();
-        try { fs.writeFileSync(this.file + '.tmp', JSON.stringify(this.saved)); fs.renameSync(this.file + '.tmp', this.file); }
-        catch { this.error = '无法保存公告记录，重启后可能重复提醒'; }
+        if (this.migrationError) { this.error = this.migrationError; return false; }
+        try {
+            fs.writeFileSync(this.file + '.tmp', JSON.stringify(this.saved)); fs.renameSync(this.file + '.tmp', this.file);
+            if (this.error === this.storageError) this.error = null;
+            this.storageError = null; return true;
+        } catch (error) {
+            this.storageError = `无法保存消息记录（${error.code || '写入失败'}），请重试；未读标记未确认`;
+            this.error = this.storageError; return false;
+        }
     }
     nextCheckAt() {
         const interval = Math.min(HOUR, AUTO_INTERVAL * 2 ** Math.min(this.saved.failures || 0, 3));
@@ -99,12 +103,13 @@ class ResetNotices {
         this.prune();
         const c = this.saved.community;
         const record = this.saved.records.find(r => r.id === c?.active?.id);
-        const activeNotice = record && record.verificationStatus !== 'rejected' && (!record.verified || record.kind === c.active.kind)
+        const activeNotice = record && record.kind !== 'unrelated' && record.verificationStatus !== 'rejected' && (!record.verified || record.kind === c.active.kind && ['announced', 'completed'].includes(record.stage))
             ? { ...c.active, verified: record.verified && record.stage === c.active.stage } : null;
-        return { ...this.saved, records: this.saved.records.map(r => ({ ...r })), loading: this.loading, error: this.error,
+        const { accountBaselines, forecasts, ...publicState } = this.saved;
+        return { ...publicState, forecastHistory: forecastSummary(this.saved), records: this.saved.records.filter(r => r.kind !== 'unrelated').map(r => ({ ...r })).sort((a, b) => Number(a.read !== false) - Number(b.read !== false) || messagePriority(a) - messagePriority(b) || b.publishedAt - a.publishedAt), loading: this.loading, error: this.error,
             nextCheckAt: this.saved.enabled ? this.nextCheckAt() : null, manualCheckAt: this.manualCheckAt(), verificationEnabled: this.canVerify(),
             forecast: c ? { asOf: c.asOf, percent: c.percent, healthy: c.healthy } : null, activeNotice,
-            unread: this.saved.records.filter(r => r.verified && !r.read).length, account: this.account, recoveries: this.recoveries, cardArrival: this.cardArrival };
+            unread: this.saved.records.filter(r => r.verified && r.kind !== 'unrelated' && r.read === false).length, account: this.account, recoveries: this.recoveries, cardArrival: this.cardArrival };
     }
     emit() { this.onChange(this.view()); }
     start() { this.stopped = false; this.persist(); this.schedule(); }
@@ -121,25 +126,74 @@ class ResetNotices {
     }
     markRead(id) {
         const record = this.saved.records.find(r => r.id === id);
-        if (record) record.read = true;
-        this.persist(); this.emit(); return this.view();
+        return this.markReadBatch(record ? [{ id, revision: record.revision || 1 }] : []);
+    }
+    markReadBatch(items) {
+        if (!Array.isArray(items)) return this.view();
+        const changes = [];
+        for (const item of items) {
+            const record = this.saved.records.find(r => r.id === item?.id);
+            if (record && (record.revision || 1) === item.revision) {
+                changes.push({ record, read: record.read, manualReadAt: record.manualReadAt });
+                record.read = true; record.manualReadAt = this.now();
+            }
+        }
+        if (!this.persist()) for (const change of changes.reverse()) { change.record.read = change.read; change.record.manualReadAt = change.manualReadAt; }
+        this.emit(); return this.view();
     }
     setShowProbability(show) { this.saved.showProbability = show; this.persist(); this.emit(); return this.view(); }
+    importArchive(seed) {
+        let added = 0;
+        for (const item of seed?.records || []) {
+            if (!postUrl(item.url) || item.id !== item.url.split('/').at(-1) || !Number.isFinite(item.publishedAt) || item.publishedAt > this.now() || typeof item.text !== 'string') continue;
+            const existing = this.saved.records.find(r => r.id === item.id);
+            const metadata = { eventId: item.eventId || item.id, scope: item.scope || null, outcomeScope: item.outcomeScope || 'unknown', archiveSource: item.archiveSource, archiveUrl: item.archiveUrl };
+            if (existing) {
+                for (const [key, value] of Object.entries(metadata)) if (existing[key] == null) existing[key] = value;
+                continue;
+            }
+            this.saved.records.push({ ...metadata, id: item.id, url: item.url, text: item.text.slice(0, 5000), publishedAt: item.publishedAt,
+                kind: item.kind, stage: item.stage, verified: false, read: true, eligible: false, revision: 1, source: 'archive',
+                timestampBasis: item.timestampBasis || 'archive-post',
+                firstSeenAt: this.now(), processingReason: '历史补录，默认已读；社区摘要不是原文' });
+            added++;
+        }
+        this.saved.coverage = { requestedFrom: seed.requestedFrom, requestedTo: seed.requestedTo, collectedAt: seed.collectedAt,
+            note: `补录范围 ${seed.requestedFrom?.slice(0, 10)} 至 ${seed.requestedTo?.slice(0, 10)}；存档有原帖链接的候选 ${seed.records?.length || 0} 条。覆盖不完整，尤其缺少部分回复和服务动态；无原帖链接的事件未冒充可核验消息。` };
+        this.prune(); return added;
+    }
     updateAccount(state) {
         if (state.status !== 'ready') { this.account = this.account ? { ...this.account, stale: true } : null; this.emit(); return; }
         const available = state.resetCredits?.credits?.filter(c => c.status === 'available' && (!Number.isFinite(c.expiresAt) || (c.expiresAt < 1e11 ? c.expiresAt * 1000 : c.expiresAt) > this.now()));
-        const next = { planType: state.planType ?? null, hasFiveHour: state.hasFiveHour ?? null, fiveHour: state.fiveHour?.remainingPercent ?? null, weekly: state.weekly?.remainingPercent ?? null,
+        const next = { accountKey: state.accountKey || null, planType: state.planType ?? null, hasFiveHour: state.hasFiveHour ?? null, fiveHour: state.fiveHour?.remainingPercent ?? null, weekly: state.weekly?.remainingPercent ?? null,
             creditIds: available ? available.map(c => c.id) : null, credits: available ? available.length : null, updatedAt: state.lastUpdatedAt, stale: false };
-        if (this.account?.planType !== next.planType) { this.recoveries = {}; this.cardArrival = null; }
+        if (this.account?.accountKey !== next.accountKey || this.account?.planType !== next.planType) { this.recoveries = {}; this.cardArrival = null; }
         else {
             for (const key of ['fiveHour', 'weekly']) {
                 const before = this.account?.[key], after = next[key];
                 if (Number.isFinite(before) && Number.isFinite(after) && after > before && (before === 0 || after === 100)) this.recoveries[key] = { at: this.now(), remaining: after };
             }
-            if (this.account?.creditIds && next.creditIds) {
-                const added = next.creditIds.filter(id => !this.account.creditIds.includes(id));
-                if (added.length) this.cardArrival = { at: this.now(), count: added.length };
+        }
+        // Without an account identity, don't compare inventories belonging to possibly different users.
+        if (next.accountKey && available) {
+            this.saved.accountBaselines ||= {};
+            const previous = this.saved.accountBaselines[next.accountKey];
+            const hash = id => createHash('sha256').update(String(id)).digest('hex');
+            const seen = previous?.seen || [];
+            const additions = previous ? available.filter(c => !seen.includes(hash(c.id))) : [];
+            if (additions.length) {
+                const id = 'arrival-' + hash(next.accountKey + additions.map(c => hash(c.id)).sort().join(','));
+                const text = `本次检查发现 ${additions.length} 张新增重置卡；发现时间不代表准确到账时间。`;
+                if (!this.saved.records.some(r => r.id === id)) this.saved.records.push({ id, kind: 'arrival', stage: 'completed', source: 'account', accountKey: next.accountKey,
+                    publishedAt: this.now(), firstSeenAt: this.now(), verified: true, verificationStatus: 'observed', read: false, revision: 1,
+                    count: additions.length, expiresAt: additions.map(c => c.expiresAt ?? null), text, processingReason: '账户检测到新卡，等待手动标记' });
+                this.cardArrival = { at: this.now(), count: additions.length };
+            } else {
+                const latest = this.saved.records.find(r => r.kind === 'arrival' && r.accountKey === next.accountKey);
+                this.cardArrival = latest ? { at: latest.publishedAt, count: latest.count } : null;
             }
+            this.saved.accountBaselines[next.accountKey] = { seen: [...new Set([...seen, ...available.map(c => hash(c.id))])], checkedAt: this.now() };
+            this.persist();
         }
         this.account = next; this.emit();
     }
@@ -164,15 +218,23 @@ class ResetNotices {
             const initializedAt = this.saved.initializedAt || this.now();
             for (const item of snapshot.records) {
                 const existing = this.saved.records.find(r => r.id === item.id);
-                if (!existing) this.saved.records.push({ ...item, eligible: !baseline && item.publishedAt > initializedAt, read: true });
-                else if (existing.text !== item.text) Object.assign(existing, item, { originalText: null, chineseText: null, translationOriginalText: null, translationAttempts: 0, nextTranslationAt: null, read: true, verificationAttempts: 0, verificationStatus: null, nextVerificationAt: null });
+                if (!existing) this.saved.records.push({ ...item, firstSeenAt: this.now(), revision: 1, eligible: !baseline && item.publishedAt > initializedAt, read: true, processingReason: baseline || item.publishedAt <= initializedAt ? '历史收录，默认已读' : '等待原帖核验' });
+                else if (existing.text !== item.text) {
+                    // A community summary edit is not proof that the original post changed.
+                    existing.text = item.text; existing.needsRecheck = true; existing.nextVerificationAt = null;
+                    if (!existing.originalText) Object.assign(existing, { kind: item.kind, stage: item.stage });
+                }
                 else if (!existing.verified && existing.verificationStatus !== 'rejected') { existing.kind = item.kind; existing.stage = item.stage; existing.source = 'community'; }
+                if (existing) for (const key of ['scope', 'communityCompletedAt']) if (item[key] != null) existing[key] = item[key];
             }
             this.prune();
+            recordForecast(this.saved, snapshot, this.now());
+            this.persist();
             if (fresh) {
                 this.saved.initialized = true; this.saved.initializedAt = initializedAt;
                 if (this.canVerify()) await this.verifyCandidates();
             }
+            recordForecast(this.saved, snapshot, this.now());
         } catch (error) {
             if (!this.stopped && !this.abort.signal.aborted) {
                 this.saved.failures = (this.saved.failures || 0) + 1;
@@ -184,11 +246,12 @@ class ResetNotices {
     }
     async verifyCandidates() {
         const needsTranslation = r => r.originalText && !r.chineseText && (r.translationAttempts || 0) < 3 && (!r.nextTranslationAt || r.nextTranslationAt <= this.now());
-        const candidates = this.saved.records.filter(r => r.source === 'community' && r.publishedAt >= this.now() - 3 * DAY &&
-            (r.originalText ? needsTranslation(r) : !r.verified && r.verificationStatus !== 'rejected' && (r.verificationAttempts || 0) < 3 &&
-            (!r.nextVerificationAt || r.nextVerificationAt <= this.now()))).slice(0, 2);
+        const candidates = this.saved.records.filter(r => r.kind !== 'arrival' && postUrl(r.url) &&
+            (!r.nextVerificationAt || r.nextVerificationAt <= this.now()) &&
+            (r.needsRecheck || (r.originalText ? needsTranslation(r) : !r.verified && r.verificationStatus !== 'rejected')))
+            .sort((a, b) => Number(Boolean(b.eligible)) - Number(Boolean(a.eligible)) || Number(Boolean(a.originalText)) - Number(Boolean(b.originalText)) || b.publishedAt - a.publishedAt).slice(0, 2);
         for (const record of candidates) {
-            const translationOnly = Boolean(record.originalText);
+            const translationOnly = Boolean(record.originalText) && !record.needsRecheck;
             try {
                 const page = await this.scrapePage(record.url, { signal: this.abort.signal });
                 if (this.stopped || this.abort.signal.aborted) break;
@@ -200,14 +263,27 @@ class ResetNotices {
                 }
                 if (!text) {
                     record.verificationAttempts = (record.verificationAttempts || 0) + 1;
-                    record.verificationStatus = 'unreadable'; record.nextVerificationAt = this.now() + 6 * HOUR; continue;
+                    record.verificationStatus = 'unreadable'; record.nextVerificationAt = this.now() + Math.min(7 * DAY, 6 * HOUR * 2 ** Math.min(record.verificationAttempts - 1, 5)); continue;
                 }
                 const result = classifyPost(text);
+                const previous = record.originalText;
+                const changed = Boolean(previous && previous.replace(/\s+/g, ' ').trim() !== text.replace(/\s+/g, ' ').trim());
+                const acknowledgeDuringCheck = record.manualReadAt && record.manualReadAt >= this.saved.lastAttemptAt;
+                if (changed) {
+                    record.previousOriginals = [...(record.previousOriginals || []), { text: previous, at: record.verifiedAt }];
+                    record.revision = (record.revision || 1) + 1; record.changedAt = this.now();
+                    record.chineseText = null; record.translationOriginalText = null;
+                }
                 Object.assign(record, result, { originalText: text, verifiedAt: this.now(), verificationFailures: 0 });
+                record.outcomeScope = /\b(?:affected|some|replacement|failed|targeted)\b/i.test(text) ? 'targeted' : /\ball (?:paid |codex |chatgpt work )?(?:users|accounts|plans)\b|\beveryone\b/i.test(text) ? 'broad' : 'unknown';
+                record.deadlineAt = explicitDeadline(text);
+                record.needsRecheck = false; record.nextVerificationAt = null;
                 saveTranslation(record, page.translation, text, this.now());
-                if (result.kind === 'hint') { record.verificationStatus = 'rejected'; record.read = true; continue; }
-                record.verified = true; record.verificationStatus = 'verified'; record.read = !record.eligible;
-                if (record.eligible && !record.notified) { record.notified = true; this.persist(); this.onNotice(record); }
+                record.verified = true; record.verificationStatus = 'verified';
+                if (result.kind === 'unrelated') { record.read = true; record.processingReason = '原帖已核验，内容无关，不提醒'; continue; }
+                if (!previous || changed) record.read = acknowledgeDuringCheck && !changed ? true : !(changed || record.eligible);
+                record.processingReason = record.read ? record.manualReadAt ? '已手动标记已读' : '历史收录，默认已读' : changed ? '原帖内容更新，恢复未读' : '相关原帖已核验，等待手动标记';
+                if (!record.read && (!record.notified || changed)) { record.notified = true; this.persist(); this.onNotice(record); }
             } catch {
                 if (this.stopped || this.abort.signal.aborted) break;
                 if (translationOnly) { saveTranslation(record, null, record.originalText, this.now()); continue; }

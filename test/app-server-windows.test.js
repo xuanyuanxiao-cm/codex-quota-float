@@ -25,7 +25,7 @@ for (const entry of ['CODEX_CLI_PATH', 'PATH']) test(`Windows starts an offline 
   process.env.LOCALAPPDATA = dir;
   if (entry === 'CODEX_CLI_PATH') process.env.CODEX_CLI_PATH = shim;
   else process.env.PATH = `${dir}${path.delimiter}${path.join(process.env.SystemRoot, 'System32')}`;
-  const client = new AppServerClient({ requestTimeoutMs: 2000 });
+  const client = new AppServerClient({ requestTimeoutMs: 2000, getAccountKey: () => null });
   try {
     assert.deepEqual(await client.readRateLimits(), { rateLimits: { primary: { usedPercent: 25 } }, rateLimitResetCredits: null });
   } finally { await client.stop(); }

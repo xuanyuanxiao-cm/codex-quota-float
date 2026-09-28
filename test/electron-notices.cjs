@@ -22,7 +22,7 @@ let communityStale = false, communityFail = false;
 AppServerClient.prototype.start = async () => {};
 AppServerClient.prototype.stop = async () => {};
 AppServerClient.prototype.onRateLimitsUpdated = () => () => {};
-AppServerClient.prototype.readRateLimits = async () => ({ rateLimits: {
+AppServerClient.prototype.readRateLimits = async () => ({ accountKey: 'test-account', rateLimits: {
     planType: weeklyOnly ? 'pro' : 'plus',
     primary: weeklyOnly ? null : { usedPercent: 100 - remaining, windowDurationMins: 300, resetsAt: (now + HOUR) / 1000 },
     secondary: { usedPercent: 32, windowDurationMins: 10080, resetsAt: (now + 3 * 24 * HOUR) / 1000 },
@@ -70,6 +70,8 @@ async function capture(win, name) {
     await handlers.get('quota:refresh-notices')();
     assert.equal(handlers.get('quota:read-notices')().error, null);
     await until(() => evaluate(windows[0], '!document.querySelector("[data-orb-notice]").hidden'));
+    assert.equal(await evaluate(windows[0], 'document.querySelector("[data-orb-notice]").textContent'), '1');
+    assert.equal(await evaluate(windows[0], 'document.querySelector("[data-probability-tag]").textContent'), '重置预告');
     assert.equal(notifications.filter(n => n.options.title.includes('收到')).length, 0);
     await capture(windows[0], 'three-badges');
     await handlers.get('quota:enable-notices')(null, false);
@@ -111,7 +113,8 @@ async function capture(win, name) {
     await handlers.get('quota:open-notice-source')(null, 'https://evil.test'); assert.equal(opened.length, 1);
     await evaluate(windows[1], 'document.getElementById("mark-read").click()');
     await until(() => evaluate(windows[0], 'document.querySelector("[data-orb-notice]").hidden'));
-    assert.equal(await evaluate(windows[1], 'document.getElementById("forecast-value").textContent'), 'Tibo 预告将重置', 'reading does not erase the announcement');
+    assert.match(await evaluate(windows[1], 'document.getElementById("source").textContent'), /已手动标记已读/);
+    assert.equal(await evaluate(windows[1], 'document.getElementById("forecast-value").textContent'), '重置预告', 'reading does not erase the announcement');
     now += HOUR; items.unshift({ id: '12345678903', time: now - 1000 });
     await handlers.get('quota:refresh-notices')();
     await until(() => evaluate(windows[1], '!document.getElementById("new-notice").hidden'));
@@ -136,8 +139,8 @@ async function capture(win, name) {
     await until(() => evaluate(windows[1], 'document.getElementById("account-status").textContent.includes("新增 1 张")'));
     assert.match(await evaluate(windows[1], 'document.getElementById("account-values").textContent'), /重置卡 2/);
     communityStale = true; now += HOUR; await handlers.get('quota:refresh-notices')();
-    await until(() => evaluate(windows[1], 'document.getElementById("forecast-value").textContent === "暂时无法预测"'));
-    assert.match(await evaluate(windows[1], 'document.getElementById("forecast-note").textContent'), /暂不展示/);
+    await until(() => evaluate(windows[1], 'document.getElementById("forecast-value").textContent === "重置预告"'));
+    assert.equal(handlers.get('quota:read-notices')().forecast.healthy, false, 'local evidence remains visible when forecast feed is stale');
     await capture(windows[1], 'stale');
     weeklyOnly = true;
     await handlers.get('quota:refresh-now')();
@@ -170,10 +173,13 @@ async function capture(win, name) {
     reported.forecast.asOf = Date.now();
     reported.activeNotice.stage = 'completed'; reported.activeNotice.verified = false;
     windows[0].webContents.send('quota:notices', reported); windows[1].webContents.send('quota:notices', reported);
-    await until(() => evaluate(windows[1], 'document.getElementById("forecast-value").textContent === "社区报告已重置"'));
-    assert.match(await evaluate(windows[1], 'document.getElementById("forecast-note").textContent'), /原帖只确认了预告/);
-    assert.match(await evaluate(windows[1], 'document.getElementById("forecast-evidence").textContent'), /明确预告将重置额度/);
-    assert.equal(await evaluate(windows[0], 'document.querySelector("[data-probability-tag]").textContent'), '社区记录重置');
+    await until(() => evaluate(windows[1], 'document.getElementById("forecast-value").textContent === "重置预告"'));
+    assert.equal(await evaluate(windows[0], 'document.querySelector("[data-probability-tag]").textContent'), '重置预告');
+    await evaluate(windows[1], 'document.getElementById("mark-all-read").click()');
+    await until(() => handlers.get('quota:read-notices')().unread === 0);
+    const many = { ...reported, unread: 103 };
+    windows[0].webContents.send('quota:notices', many);
+    await until(() => evaluate(windows[0], 'document.querySelector("[data-orb-notice]").textContent === "99+"'));
     assert.deepEqual(await folds(), [false, false]);
     assert.deepEqual(await evaluate(windows[1], 'Array.from(document.querySelectorAll("details[open]")).map(element => element.id)'), ['detail'], 'new community progress preserves the collapsed explanation');
     assert.equal(await evaluate(windows[1], 'document.body.scrollWidth > innerWidth'), false);

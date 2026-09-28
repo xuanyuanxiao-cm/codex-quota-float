@@ -30,7 +30,13 @@ electron_1.contextBridge.exposeInMainWorld('quota', {
         electron_1.ipcRenderer.on('quota:work-area-height', handler);
         return () => electron_1.ipcRenderer.removeListener('quota:work-area-height', handler);
     },
-    openNotices: () => electron_1.ipcRenderer.invoke('quota:open-notices'),
+    openNotices: (id) => electron_1.ipcRenderer.invoke('quota:open-notices', id),
+    subscribeNoticeSelection: (callback) => {
+        const handler = (_event, id) => callback(id);
+        electron_1.ipcRenderer.on('quota:select-notice', handler);
+        return () => electron_1.ipcRenderer.removeListener('quota:select-notice', handler);
+    },
+    markNoticesRead: (items) => electron_1.ipcRenderer.invoke('quota:read-notices-batch', items),
     readNotices: () => electron_1.ipcRenderer.invoke('quota:read-notices'),
     refreshNotices: () => electron_1.ipcRenderer.invoke('quota:refresh-notices'),
     markNoticeRead: (id) => electron_1.ipcRenderer.invoke('quota:read-notice', id),

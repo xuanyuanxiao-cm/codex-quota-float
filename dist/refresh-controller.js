@@ -110,6 +110,7 @@ class RefreshController {
             this.hasSnapshot = true;
             this.emit({
                 status: 'ready',
+                accountKey: reading.accountKey || null,
                 ...views,
                 ...quotaProfile(this.rawSnapshot, views),
                 resetCredits: cloneResetCredits(reading.rateLimitResetCredits),
@@ -207,6 +208,7 @@ class RefreshController {
         this.hasSnapshot = true;
         this.emit({
             status: 'ready',
+            accountKey: this.state.accountKey || null,
             ...views,
             ...quotaProfile(this.rawSnapshot, views),
             resetCredits: cloneResetCredits(this.state.resetCredits),

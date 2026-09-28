@@ -3,10 +3,10 @@
     const api = window.quota;
     const $ = id => document.getElementById(id);
     const time = value => Number.isFinite(value) ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '尚未检查';
-    const titles = { reset: '额度重置公告', banked: '重置卡发放公告', limits: '额度上限调整', hint: '重置相关动态' };
-    const stage = r => r.kind === 'hint' ? '相关线索' : r.kind === 'limits' ? '上限调整' : r.stage === 'completed' ? r.kind === 'banked' ? '已发卡' : '已执行' : '已预告';
-    const status = r => r.verified ? `${stage(r)} · 原帖已核验` : r.verificationStatus === 'rejected' ? '未确认公告 · 原帖已读取' : '社区收录 · 待核验';
-    let state, selectedId, checking = false;
+    const titles = { reset: '额度重置消息', banked: '重置卡消息', limits: '额度与重置卡规则', hint: '重置相关动态', service: '服务动态', arrival: '账户新增重置卡' };
+    const stage = r => r.stage === 'cancelled' ? '已取消' : r.stage === 'in-progress' ? '进行中' : r.kind === 'hint' ? '相关线索 · 非明确承诺' : r.kind === 'service' ? '服务动态' : r.kind === 'limits' ? '规则信息' : r.stage === 'completed' ? r.kind === 'banked' ? '已发卡' : '已完成' : '已预告';
+    const status = r => r.kind === 'arrival' ? '账户检查发现' : r.verified ? `${stage(r)} · 原帖已核验` : r.verificationStatus === 'rejected' ? '原帖已读取 · 待重新分类' : '社区收录 · 待核验';
+    let state, selectedId, checking = false, historyLimit = 50;
     function renderCheck() {
         if (!state) return;
         const loading = checking || state.loading;
@@ -21,7 +21,7 @@
         $('sync-panel').classList.toggle('failed', failed && !loading);
         $('sync-reason').textContent = loading ? '正在检查社区动态与公告，请稍候。' : failed ? `保留上次读取结果。${seconds ? '短暂等待后可手动重试。' : '现在可以手动重试。'}` : !state.enabled && !seconds ? '后台定时检查已暂停，你仍可手动检查。' : '';
         $('sync-reason').hidden = !$('sync-reason').textContent;
-        $('sync-last').textContent = `上次成功读取：${time(state.lastSuccessAt)}`;
+        $('sync-last').textContent = `最近检查：${time(state.lastAttemptAt)}；上次成功：${time(state.lastSuccessAt)}`;
         $('sync-next').textContent = state.enabled ? `${failed ? '自动重试' : '下次检查'}：${time(state.nextCheckAt)}` : '自动检查已暂停';
     }
     function render(next) {
@@ -42,18 +42,19 @@
         }));
         $('forecast-account-note').textContent = presentation.accountNote;
         $('forecast-basis-text').textContent = `上游计算时间：${time(state.forecast?.asOf)}。接口最近读取：${time(state.lastSuccessAt)}。`;
-        const record = state.records.find(r => r.id === selectedId) || state.records.find(r => r.id === state.activeNotice?.id) || state.records[0];
+        const record = state.records.find(r => r.id === selectedId) || state.records.find(r => r.verified && !r.read) || state.records.find(r => r.id === presentation.recordId) || state.records[0];
         selectedId = record?.id;
         const unseen = state.records.filter(r => r.verified && !r.read && r.id !== selectedId);
         $('new-notice').hidden = !unseen.length;
-        $('new-notice').textContent = `查看 ${unseen.length} 条新公告`;
+        $('new-notice').textContent = `查看 ${unseen.length} 条未读消息`;
         $('status').textContent = record ? status(record) : '暂无新动态';
         $('status').className = `tag${record?.verified ? ' verified' : ''}`;
         $('title').textContent = record ? titles[record.kind] || titles.hint : '下一次额外重置，暂无明确时间';
-        $('published').textContent = record ? `收录事件时间：${time(record.publishedAt)}` : '';
-        $('summary').textContent = !record ? '目前没有收录的重置公告。' : record.verificationStatus === 'rejected' ? '读取到的原帖不足以确认重置或发卡，保留为相关动态。' : !record.verified ? '以下为社区收录的信息，本应用尚未核验原帖；社区的执行记录不代表本账户已到账。' : record.kind === 'banked' ? '原帖包含发卡消息；需要手动使用重置卡，发卡不等于额度已恢复。' : record.kind === 'limits' ? '原帖包含额度上限调整消息，不将其显示为重置公告。' : record.stage === 'announced' ? '原帖已预告重置。具体适用范围与生效时间请查看原文，账户状态单独确认。' : '原帖表示已执行重置，本账户生效情况仍以账户读数为准。';
-        $('source').textContent = record ? `Tibo · @thsottiaux ／ ${record.verified ? '本地原帖核验通过' : record.source === 'legacy' ? '旧版历史 · 待重新核验' : 'Codex Reset Observatory（社区）'}` : '';
-        $('original').hidden = !record; $('quote-wrap').hidden = !record;
+        $('published').textContent = record ? `${record.kind === 'arrival' ? '检查发现时间' : record.timestampBasis === 'archive-event' ? '存档事件时间（原帖发布时间未核实）' : '收录发布时间'}：${time(record.publishedAt)}` : '';
+        const summaries = { hint: '这是重置相关讨论，包含疑问、否定或条件时，不解释为明确承诺。', service: '服务故障、恢复或致歉不等于承诺补偿，不自动提高预测概率。', limits: '额度或重置卡规则信息，不等同于一次重置。', arrival: record?.text };
+        $('summary').textContent = !record ? '目前没有收录的相关消息。' : !record.verified ? '社区收录，尚未核验原帖；来源有覆盖缺口，不能据此确认你的账户已到账。' : summaries[record.kind] || (record.stage === 'cancelled' ? '安排已取消，以最新原文为准。' : record.stage === 'completed' ? '原帖确认已完成，账户实际生效情况仍需单独确认。' : record.stage === 'in-progress' ? '原帖表示正在执行，尚未确认全部完成。' : '明确预告；具体时间、适用范围和重置方式以原文为准，未说明的部分保留未知。');
+        $('source').textContent = record ? `${record.kind === 'arrival' ? '账户检测' : `Tibo · @thsottiaux ／ ${record.verified ? '本地原帖核验通过' : '社区收录 · 待核验'}`}。${record.read && record.manualReadAt ? '已手动标记已读' : record.processingReason || (record.read ? '已读' : '待手动标记')}。${record.archiveSource ? `补录来源：${record.archiveSource}` : ''}` : '';
+        $('original').hidden = !record?.url; $('quote-wrap').hidden = !record;
         $('quote-label').textContent = record?.originalText ? '查看读取到的原帖' : '查看社区收录内容';
         $('quote').textContent = record?.originalText || record?.text || '';
         $('translation-wrap').hidden = !record?.originalText;
@@ -70,18 +71,25 @@
         const percent = value => Number.isFinite(value) ? `${Math.round(value)}%` : '未知';
         $('account-values').textContent = account ? `${account.hasFiveHour === false ? '' : `5 Hours ${percent(account.fiveHour)}　·　`}Weekly ${percent(account.weekly)}　·　重置卡 ${account.credits ?? '未知'}` : '';
         $('account-note').textContent = account ? `额度更新：${time(account.updatedAt)}。${recovered.length || arrival ? '仅记录读数变化，不能据此确定由本次公告触发；新卡需手动使用。' : '首次读取不能判断此前变化，尚未观察到恢复不等于未到账。'}` : '公告和账户状态分别记录。';
-        $('history').replaceChildren(...state.records.map(r => {
+        const range = $('history-range').value;
+        const history = state.records.filter(r => range === 'all' || range === 'unread' && r.verified && !r.read || range === 'recent' && (r.publishedAt >= Date.now() - 30 * 86400000 || r.verified && !r.read));
+        $('history').replaceChildren(...history.slice(0, historyLimit).map(r => {
             const button = document.createElement('button'); button.className = 'history-item';
             button.setAttribute('aria-pressed', String(r.id === selectedId));
             button.textContent = `${r.verified && !r.read ? '未读 · ' : ''}${status(r)} · ${titles[r.kind] || titles.hint}`;
             const stamp = document.createElement('small'); stamp.textContent = time(r.publishedAt); button.append(stamp);
             button.addEventListener('click', () => { selectedId = r.id; $('detail').open = true; render(state); }); return button;
         }));
-        $('history-count').textContent = `${state.records.length} 条 · 点击展开`;
+        $('history-count').textContent = `${state.records.length} 条 · ${state.unread} 条未读`;
+        $('history-more').hidden = historyLimit >= history.length;
+        $('mark-all-read').disabled = !state.unread;
+        $('coverage').textContent = state.coverage?.note || '记录长期保存；来源仅覆盖部分公开消息，无法保证完整时间线。';
+        const journal = state.forecastHistory;
+        $('prediction-history').textContent = journal ? `预测记录 ${journal.total} 次 · 待观察 ${journal.pending} · 有事件证据 ${journal.events} · 无法评价 ${journal.unscorable}。未发现事件不代表未发生；尚不计算准确率。` : '';
         const fresh = state.forecast?.healthy && Date.now() - state.forecast.asOf <= 21600000;
         $('community-health').textContent = `社区接口：${state.error || (fresh ? '正常' : '数据过期或尚不可用')} · ${time(state.lastSuccessAt)}`;
-        const verification = { verified: '通过', rejected: '未确认公告', unreadable: '页面结构不可识别', 'network-error': '网络失败，等待重试' };
-        $('verification-health').textContent = `当前原帖核验：${!state.verificationEnabled ? '未配置 FIRECRAWL_API_KEY，保留为社区收录' : verification[record?.verificationStatus] || '等待核验'}${record?.nextVerificationAt ? ` · 重试不早于 ${time(record.nextVerificationAt)}` : ''}`;
+        const verification = { verified: '原帖可信，内容含义单独分类', rejected: '等待重新分类', unreadable: '原文暂不可读，将重试', 'network-error': '网络失败，等待重试', observed: '账户检查发现' };
+        $('verification-health').textContent = `当前核验：${verification[record?.verificationStatus] || (!state.verificationEnabled ? '核验未配置，保留为社区收录' : '等待核验')}${record?.nextVerificationAt ? ` · 重试不早于 ${time(record.nextVerificationAt)}` : ''}`;
     }
     $('check').addEventListener('click', async () => {
         renderCheck();
@@ -95,8 +103,16 @@
     $('original').addEventListener('click', () => { if (selectedId) void api.openNoticeSource(selectedId); });
     $('new-notice').addEventListener('click', () => { selectedId = state.records.find(r => r.verified && !r.read && r.id !== selectedId)?.id; render(state); });
     $('mark-read').addEventListener('click', async () => {
-        try { render(await api.markNoticeRead(selectedId)); } catch { $('error').hidden = false; $('error').textContent = '未能标记已读，请重试。'; }
+        const record = state.records.find(r => r.id === selectedId);
+        try { render(await api.markNoticesRead([{ id: record.id, revision: record.revision || 1 }])); } catch { $('error').hidden = false; $('error').textContent = '未能标记已读，请重试。'; }
     });
+    $('mark-all-read').addEventListener('click', async () => {
+        const seen = state.records.filter(r => r.verified && !r.read).map(r => ({ id: r.id, revision: r.revision || 1 }));
+        try { render(await api.markNoticesRead(seen)); } catch { $('error').hidden = false; $('error').textContent = '未能标记已读，请重试。'; }
+    });
+    $('history-range').addEventListener('change', () => { historyLimit = 50; render(state); });
+    $('history-more').addEventListener('click', () => { historyLimit += 50; render(state); });
+    api.subscribeNoticeSelection?.(id => { selectedId = id; $('detail').open = true; if (state) render(state); });
     $('refresh-account').addEventListener('click', async () => {
         $('refresh-account').disabled = true;
         try { await api.refreshNow(); } catch { $('error').hidden = false; $('error').textContent = '账户刷新失败，请稍后重试。'; }

@@ -110,8 +110,6 @@ body { color: var(--ink); overflow: hidden; }
 .orb-alert.alert-unknown { background: var(--muted); }
 .quota-alert.alert-critical { color: var(--alert-critical); }
 .quota-alert.alert-exhausted { color: var(--alert-exhausted); }
-.message-icon { width: 9px; height: 7px; border: 1px solid currentColor; border-radius: 2px; position: relative; }
-.message-icon::after { content: ''; position: absolute; width: 2px; height: 2px; left: 1px; bottom: -2px; border-left: 1px solid currentColor; transform: skewY(-35deg); }
 .orb-alert.alert-recovered { background: var(--alert-recovered); color: #08271e; font-size: 11px; font-weight: 800; }
 .orb-alert.alert-expiring { top: auto; bottom: 0; background: var(--alert-expiring); color: white; }
 .clock-icon { display: inline-block; position: relative; width: 10px; height: 10px; border: 1px solid currentColor; border-radius: 50%; flex: 0 0 auto; }
@@ -123,6 +121,11 @@ body { color: var(--ink); overflow: hidden; }
 .credit-option .credit-expiring::before { content: '◷ '; }
 .trends-button { margin-top: 10px; width: 100%; padding: 7px; border: 1px solid #385b8b; border-radius: 8px; background: rgba(55,167,255,.08); color: #d9eaff; font: inherit; font-size: .78rem; cursor: pointer; }
 .orb-alert.alert-notice { left: -2px; right: auto; background: #67e8e2; color: #082b30; font-size: 11px; font-weight: 800; }
+.orb-alert.alert-notice { min-width: 19px; width: auto; padding: 0 3px; font-variant-numeric: tabular-nums; }
+.probability-tag[data-tone="blue"] { color: #99c6ff; border-color: #456891; }
+.probability-tag[data-tone="green"] { color: #78deb4; border-color: #3c715f; }
+.probability-tag[data-tone="orange"] { color: #f4c187; border-color: #8b663b; }
+.probability-tag[data-tone="neutral"] { color: #b4c2d4; }
 .notice-button { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; width: 100%; padding: 9px; border: 1px solid #285767; border-radius: 8px; background: #122b39; color: #d9f8f7; text-align: left; font: inherit; font-size: .78rem; cursor: pointer; }
 .notice-button [data-notice-summary] { color: #9ebdc9; font-size: .7rem; }
 .probability-tag { display: block; flex-shrink: 0; margin: 8px 0 0 auto; width: 76px; height: 23px; padding: 0; border: 1px solid #354a63; border-radius: 12px; background: #132035; color: #dce7f4; font: inherit; font-size: 10px; cursor: pointer; }
