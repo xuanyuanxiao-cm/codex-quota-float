@@ -4,7 +4,7 @@ body { margin: 0; }
 header { display: flex; align-items: baseline; gap: 18px; padding: 18px 26px; border-bottom: 1px solid #293e5d; }
 h1 { font-size: 21px; margin: 0; } header span, .muted { color: #a7bad4; font-size: 13px; }
 main { padding: 20px 26px; }
-.toolbar { display: flex; justify-content: space-between; align-items: center; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
 .range { display: flex; border: 1px solid #324b6c; border-radius: 9px; overflow: hidden; }
 button { border: 0; background: transparent; color: #a7bad4; padding: 9px 17px; font: inherit; font-size: 14px; cursor: pointer; }
 button[aria-pressed="true"] { background: #194579; color: white; }
@@ -20,8 +20,15 @@ svg text { font-family: inherit; fill: #a7bad4; font-size: 12px; }
 .chart-note { margin: 6px 0 18px; }
 section { border-top: 1px solid #293e5d; } h2 { font-size: 15px; margin: 16px 0 8px; }
 #events { max-height: 140px; overflow-y: auto; }
-.event { display: flex; gap: 16px; padding: 8px 0; border-top: 1px solid #263b56; font-size: 13px; color: #b8cce6; }
+.event { display: flex; gap: 16px; padding: 8px 0; border-top: 1px solid #263b56; font-size: 13px; color: #b8cce6; flex-wrap: wrap; }
 .event time { min-width: 102px; } .event .icon { width: 16px; }
 .manual { color: #f97316; } .period { color: #34d399; } .increase { color: #a7bad4; }
 footer { display: flex; justify-content: space-between; gap: 15px; margin-top: 20px; color: #8299b8; font-size: 11px; }
 #error { color: #facc15; font-size: 12px; }
+#chart { height: 300px; }
+#time-range { margin-bottom: 0; }
+@media (max-width: 480px) {
+  main { padding: 16px 12px; }
+  button { padding: 9px 10px; }
+  footer { flex-wrap: wrap; }
+}

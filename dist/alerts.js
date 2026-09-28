@@ -21,6 +21,7 @@ class QuotaAlerts {
         this.now = now;
         this.lastRefreshId = 0;
         this.pendingQuota = false;
+        this.quotaEventId = 0;
         this.recoveries = new Set();
         this.view = { windows: {}, expiringCredits: [], quotaBadge: null, creditBadges: [] };
     }
@@ -59,11 +60,12 @@ class QuotaAlerts {
                 toMillis(previous.resetsAt) <= now && toMillis(current.resetsAt) > toMillis(previous.resetsAt);
             let notified = Array.isArray(previous?.notified) ? [...previous.notified] : [];
             if (recovered || newPeriod || manual) notified = [];
-            if (recovered) { this.pendingQuota = true; this.recoveries.add(key); }
+            if (recovered) { this.pendingQuota = true; this.quotaEventId++; this.recoveries.add(key); }
             if (remaining === 0) this.recoveries.delete(key);
             const threshold = remaining === 0 ? 0 : remaining <= 10 ? 10 : remaining <= 20 ? 20 : null;
             if (threshold !== null && !notified.includes(threshold)) {
                 this.pendingQuota = true;
+                this.quotaEventId++;
                 notified = [20, 10, 0].filter(value => value >= threshold);
             }
             windows[key] = { low: threshold !== null, exhausted: remaining === 0, severity: severity(remaining) };
@@ -80,7 +82,7 @@ class QuotaAlerts {
         const levels = Object.values(windows).map(w => w.severity);
         const worst = ['exhausted', 'critical', 'low'].find(value => levels.includes(value));
         const allKnown = keys.every(key => Number.isFinite(state[key]?.remainingPercent));
-        const quotaBadge = this.pendingQuota && text.length ? { severity: worst || (allKnown ? 'recovered' : 'unknown'), text: text.join('；') } : null;
+        const quotaBadge = this.pendingQuota && text.length ? { severity: worst || (allKnown ? 'recovered' : 'unknown'), text: text.join('；'), eventId: this.quotaEventId } : null;
         if (!quotaBadge) this.pendingQuota = false;
         let expiringCredits = this.view.expiringCredits;
         let creditBadges = this.view.creditBadges;

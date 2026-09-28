@@ -150,16 +150,81 @@
     let dragStartScreenY;
     let dragPointerOffsetY = 0;
     let movedDuringDrag = false;
+    let hoveringOrb = false;
+    let summaryUntil = 0, summaryTimer;
+    let lastRefreshId, lastNoticeSuccess, lastQuotaEvent;
+    const summaryKinds = new Set();
+    const seenCredits = new Set(), seenNotices = new Set();
+    const newSummary = (kind) => {
+      if (now() >= summaryUntil) summaryKinds.clear();
+      summaryKinds.add(kind);
+      summaryUntil = now() + 15000;
+      clearTimeout(summaryTimer);
+      summaryTimer = setTimeout(() => { summaryKinds.clear(); syncWindowLayout(); }, 15000);
+    };
+    const updateQuotaSummary = (state) => {
+      if (state.status !== 'ready' || state.isResetting) return;
+      if (Number.isFinite(state.refreshId) && state.refreshId !== lastRefreshId) {
+        lastRefreshId = state.refreshId;
+        const keys = state.hasFiveHour === false ? ['weekly'] : ['fiveHour', 'weekly'];
+        if (keys.every(key => Number.isFinite(state[key]?.remainingPercent))) summaryKinds.delete('quota');
+        if (state.resetCredits != null) summaryKinds.delete('credits');
+      }
+      const badge = state.alerts?.quotaBadge;
+      if (!badge) summaryKinds.delete('quota');
+      else {
+        const event = badge.eventId ?? badge.severity;
+        if (event !== lastQuotaEvent) { lastQuotaEvent = event; newSummary('quota'); }
+      }
+      const credits = (state.alerts?.creditBadges ?? []).filter(c => c.expiresAt > now());
+      if (!credits.length) summaryKinds.delete('credits');
+      for (const credit of credits) {
+        const key = `${credit.id}:${credit.expiresAt}`;
+        if (!seenCredits.has(key)) { seenCredits.add(key); newSummary('credits'); }
+      }
+    };
+    const updateNoticeSummary = (state) => {
+      if (state.loading) return;
+      if (!state.error && state.lastSuccessAt != null && state.lastSuccessAt !== lastNoticeSuccess) {
+        lastNoticeSuccess = state.lastSuccessAt;
+        summaryKinds.delete('notices');
+      }
+      if (!state.unread) summaryKinds.delete('notices');
+      for (const record of state.records ?? []) {
+        if (!record.verified || record.read !== false || record.kind === 'unrelated') continue;
+        const key = `${record.id}:${record.revision || 1}`;
+        if (!seenNotices.has(key)) { seenNotices.add(key); newSummary('notices'); }
+      }
+    };
+    const updateOrbTooltip = () => {
+      const messages = [];
+      for (const [key, label] of [['fiveHour', '5 小时'], ['weekly', '周']]) {
+        if (key === 'fiveHour' && latestState?.hasFiveHour === false) continue;
+        const remaining = latestState?.[key]?.remainingPercent;
+        if (Number.isFinite(remaining) && remaining <= 20) messages.push(`${label}额度${remaining === 0 ? '已耗尽' : '偏低'}：剩余 ${Math.round(remaining)}%`);
+      }
+      if (latestState?.alerts?.quotaBadge?.text.includes('已恢复')) {
+        messages.length = 0;
+        messages.push(latestState.alerts.quotaBadge.text);
+      }
+      const credits = (latestState?.alerts?.expiringCredits ?? []).filter(c => c.expiresAt > now());
+      if (credits.length) messages.push(`重置卡：${credits.length} 张将在 24 小时内到期，最快剩余 ${formatCountdown(credits[0].expiresAt, now())}`);
+      if (latestNotices?.unread) messages.push(`重置动态：${latestNotices.unread} 条未读消息`);
+      if (messages.length && ['stale', 'error'].includes(latestState?.status)) messages.push('额度读取失败，以上额度为最近一次记录');
+      orb.setAttribute('title', messages.join('\n') || '点击查看额度详情');
+      orb.setAttribute('aria-label', messages.length ? `查看额度详情：${messages.join('；')}` : '查看额度详情');
+    };
     const syncWindowLayout = () => {
+      updateOrbTooltip();
       if (alertSummary) {
         const messages = [];
-        if (latestState?.alerts?.quotaBadge) messages.push(latestState.alerts.quotaBadge.text);
+        if (summaryKinds.has('quota') && latestState?.alerts?.quotaBadge) messages.push(latestState.alerts.quotaBadge.text);
         const credits = (latestState?.alerts?.creditBadges ?? []).filter(c => c.expiresAt > now());
-        if (credits.length) messages.push(`${credits.length} 张重置卡将在 24 小时内到期`);
-        if (latestNotices?.unread) messages.push(`${latestNotices.unread} 条未读消息`);
+        if (summaryKinds.has('credits') && credits.length) messages.push(`${credits.length} 张重置卡将在 24 小时内到期`);
+        if (summaryKinds.has('notices') && latestNotices?.unread) messages.push(`${latestNotices.unread} 条未读消息`);
         if (messages.length && ['stale', 'error'].includes(latestState?.status)) messages.push('更新失败，以上为最近一次数据');
         alertSummary.textContent = messages.join('\n');
-        alertSummary.hidden = !messages.length || interaction !== 'collapsed' || edgeHidden || !creditPicker.hidden;
+        alertSummary.hidden = !messages.length || now() >= summaryUntil || hoveringOrb || interaction !== 'collapsed' || edgeHidden || !creditPicker.hidden;
         root.classList.toggle('has-alert-summary', !alertSummary.hidden);
       }
       if (edgeHidden) return;
@@ -231,6 +296,7 @@
     };
     const renderState = (state) => {
       latestState = state;
+      updateQuotaSummary(state);
       const model = buildRendererViewModel(state, now());
       root.classList.toggle('is-weekly-only', !model.showFiveHour);
       fiveHourRing.hidden = !model.showFiveHour;
@@ -270,9 +336,6 @@
       }
       if (orbRecovered) orbRecovered.hidden = low || !recovered;
       if (orbExpiring) orbExpiring.hidden = pendingCredits.length === 0;
-      const alertDescription = [badge?.text, pendingCredits.length ? `${pendingCredits.length} 张重置卡即将过期` : ""].filter(Boolean).join("；");
-      orb.setAttribute("title", alertDescription || "点击查看额度详情");
-      orb.setAttribute("aria-label", alertDescription ? `查看额度详情：${alertDescription}` : "查看额度详情");
       for (const key of ["fiveHour", "weekly"]) {
         const label = root.querySelector(`[data-alert-window="${key}"]`);
         if (!label) continue;
@@ -388,6 +451,10 @@
       renderInteraction();
     };
     orb.addEventListener("click", onOrbClick);
+    const onOrbEnter = () => { hoveringOrb = true; syncWindowLayout(); };
+    const onOrbLeave = () => { hoveringOrb = false; syncWindowLayout(); };
+    orb.addEventListener('pointerenter', onOrbEnter);
+    orb.addEventListener('pointerleave', onOrbLeave);
     orb.addEventListener("dblclick", onOrbDoubleClick);
     orb.addEventListener("pointerdown", onOrbPointerDown);
     window.addEventListener("pointermove", onOrbPointerMove);
@@ -407,6 +474,7 @@
     probabilityPanel?.addEventListener("click", onNotices);
     const renderNotices = (state) => {
       latestNotices = state;
+      updateNoticeSummary(state);
       if (orbNotice) {
         orbNotice.hidden = !state.unread;
         orbNotice.textContent = state.unread > 99 ? '99+' : String(state.unread || 0);
@@ -466,8 +534,11 @@
       probabilityTag?.removeEventListener("click", onLabel);
       probabilityPanel?.removeEventListener("click", onNotices);
       window.clearInterval?.(clockTimer);
+      clearTimeout(summaryTimer);
       resizeObserver.disconnect();
       orb.removeEventListener("click", onOrbClick);
+      orb.removeEventListener('pointerenter', onOrbEnter);
+      orb.removeEventListener('pointerleave', onOrbLeave);
       orb.removeEventListener("dblclick", onOrbDoubleClick);
       orb.removeEventListener("pointerdown", onOrbPointerDown);
       window.removeEventListener("pointermove", onOrbPointerMove);

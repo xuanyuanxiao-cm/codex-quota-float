@@ -12,6 +12,16 @@ const state = (five = 18, weekly = 16, refreshId = 1, credits = [card('a')]) => 
 });
 const tracker = saved => new QuotaAlerts(saved, () => {}, () => now);
 
+test('reminder event identity stays stable for value changes but advances for either window threshold', () => {
+  const a = tracker();
+  const first = a.update(state(8, 68)).alerts.quotaBadge;
+  assert.equal(a.update(state(7, 67)).alerts.quotaBadge.eventId, first.eventId);
+  const second = a.update(state(7, 18)).alerts.quotaBadge;
+  assert.equal(second.severity, first.severity, 'shared urgency can stay the same');
+  assert.ok(second.eventId > first.eventId, 'the other window still produces a new reminder');
+  assert.equal(a.update({ ...state(0, 0), status: 'stale' }).alerts.quotaBadge.eventId, second.eventId);
+});
+
 test('quota and credit badges clear only on the next successful full read', () => {
   const a = tracker();
   let view = a.update(state()).alerts;

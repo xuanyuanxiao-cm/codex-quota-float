@@ -5,12 +5,14 @@
   const empty = document.getElementById('empty');
   const events = document.getElementById('events');
   const NS = 'http://www.w3.org/2000/svg';
-  let hours = 24;
+  let hours = 'auto';
+  let automaticRange;
   let history = { samples: [], now: Date.now() };
   let visible = [];
   let hasFiveHour = false;
   let start, end;
-  const left = 53, right = 878, top = 32, bottom = 260;
+  const left = 53, top = 32, bottom = 260;
+  let width = 900, right = 790;
   const x = (at) => left + (at - start) / (end - start) * (right - left);
   const y = (percent) => bottom - percent / 100 * (bottom - top);
   const dateText = (at) => new Date(at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -23,21 +25,33 @@
     return node;
   }
   function render() {
-    end = history.now;
-    start = end - hours * 3600000;
-    visible = history.samples.filter((sample) => sample.at >= start && sample.at <= end);
+    const samples = history.samples.filter(sample => sample.at <= history.now).sort((a, b) => a.at - b.at);
+    if (hours === 'auto') {
+      automaticRange = window.trendModel.autoRange(samples, history.now, automaticRange);
+      ({ start, end } = automaticRange);
+    } else { end = history.now; start = end - Number(hours) * 3600000; }
+    visible = samples.filter((sample) => sample.at >= start && sample.at <= end);
+    width = chart.getBoundingClientRect().width || 900;
+    right = width - 110;
+    chart.setAttribute('viewBox', `0 0 ${width} 300`);
+    document.getElementById('time-range').textContent = `${hours === 'auto' ? '自动 · 最近一段消耗' : '固定范围'}　${dateText(start)} — ${dateText(end)}`;
     hasFiveHour = visible.some((sample) => Number.isFinite(sample.fiveHour?.remainingPercent));
     document.getElementById('five-hour-legend').hidden = !hasFiveHour;
     chart.replaceChildren();
     tooltip.hidden = true;
     empty.hidden = visible.length > 0;
-    for (const percent of [0, 25, 50, 75, 100]) {
+    for (const percent of [0, 50, 100]) {
       svg('line', { x1: left, x2: right, y1: y(percent), y2: y(percent), stroke: '#263b56' });
       svg('text', { x: left - 10, y: y(percent) + 4, 'text-anchor': 'end' }, `${percent}%`);
     }
-    for (let i = 0; i <= 6; i++) {
-      const at = start + (end - start) * i / 6;
-      svg('text', { x: x(at), y: bottom + 27, 'text-anchor': i === 0 ? 'start' : i === 6 ? 'end' : 'middle' }, hours === 24 ? new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : new Date(at).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }));
+    for (const [percent, color] of [[20, '#facc15'], [10, '#fb923c']]) {
+      svg('line', { x1: left, x2: right, y1: y(percent), y2: y(percent), stroke: color, opacity: '.5', 'stroke-dasharray': '4 5', 'data-threshold': percent });
+      svg('text', { x: left - 10, y: y(percent) + 4, 'text-anchor': 'end' }, `${percent}%`);
+    }
+    const ticks = width < 500 ? 3 : 6;
+    for (let i = 0; i < ticks; i++) {
+      const at = start + (end - start) * i / (ticks - 1);
+      svg('text', { x: x(at), y: bottom + 27, 'text-anchor': i === 0 ? 'start' : i === ticks - 1 ? 'end' : 'middle' }, end - start <= 86400000 ? new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : new Date(at).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }));
     }
     for (let i = 1; i < visible.length; i++) {
       const a = visible[i - 1], b = visible[i];
@@ -46,6 +60,7 @@
         if (x(b.at) - x(a.at) > 55) svg('text', { x: (x(a.at) + x(b.at)) / 2, y: (top + bottom) / 2, 'text-anchor': 'middle' }, '无记录');
       }
     }
+    const endpoints = [];
     for (const [key, color] of [['fiveHour', '#37a7ff'], ['weekly', '#8e5cff']]) {
       if (key === 'fiveHour' && !hasFiveHour) continue;
       let path = '', previous;
@@ -58,19 +73,35 @@
         previous = sample;
       }
       svg('path', { d: path, fill: 'none', stroke: color, 'stroke-width': 2.5, 'stroke-linejoin': 'round' });
+      const latest = visible.findLast(sample => Number.isFinite(sample[key]?.remainingPercent));
+      if (latest) endpoints.push({ key, color, sample: latest, cy: y(latest[key].remainingPercent) });
+    }
+    endpoints.sort((a, b) => a.cy - b.cy);
+    if (endpoints.length === 2 && endpoints[1].cy - endpoints[0].cy < 18) {
+      endpoints[0].labelY = Math.max(top + 4, Math.min(bottom - 18, endpoints[0].cy - 9));
+      endpoints[1].labelY = endpoints[0].labelY + 18;
+    }
+    for (const point of endpoints) {
+      svg('circle', { cx: x(point.sample.at), cy: point.cy, r: 3.5, fill: point.color, 'data-latest-point': point.key });
+      svg('text', { x: right + 8, y: point.labelY ?? Math.min(bottom, point.cy + 4), style: 'fill:#ecf4ff', 'data-latest-value': point.key }, `${point.key === 'fiveHour' ? '5 小时' : '周'} ${Math.round(point.sample[point.key].remainingPercent)}%`);
     }
     const eventItems = [];
     for (const sample of visible) {
-      if (sample.manualReset) eventItems.push({ at: sample.at, kind: 'manual', label: '' });
+      const previous = samples[samples.indexOf(sample) - 1];
+      const change = key => {
+        const before = previous?.[key]?.remainingPercent, after = sample[key]?.remainingPercent;
+        return Number.isFinite(before) && Number.isFinite(after) ? `${sample.gapBefore || sample.at - previous.at > 660000 ? '前次记录 ' : ''}${Math.round(before)}% → ${Math.round(after)}%` : '';
+      };
+      if (sample.manualReset) eventItems.push({ at: sample.at, kind: 'manual', label: '', change: ['fiveHour', 'weekly'].filter(key => sample.events?.[key] === 'manual' && change(key)).map(key => `${key === 'fiveHour' ? '5 小时' : '周'} ${change(key)}`).join('；') });
       for (const key of ['fiveHour', 'weekly']) {
         const kind = sample.events?.[key];
-        if (kind && kind !== 'manual') eventItems.push({ at: sample.at, kind, label: key === 'fiveHour' ? '5 小时' : '每周' });
+        if (kind && kind !== 'manual') eventItems.push({ at: sample.at, kind, label: key === 'fiveHour' ? '5 小时' : '每周', change: change(key) });
       }
     }
     for (const item of eventItems) {
       const [icon, label, color] = kinds[item.kind];
       const marker = svg('text', { x: x(item.at), y: top - 10, 'text-anchor': 'middle', style: `fill:${color}` }, icon);
-      const title = document.createElementNS(NS, 'title'); title.textContent = `${dateText(item.at)} ${item.label} ${label}`; marker.append(title);
+      const title = document.createElementNS(NS, 'title'); title.textContent = `${dateText(item.at)} ${item.label} ${label} ${item.change}`; marker.append(title);
     }
     svg('line', { id: 'hover-line', x1: left, x2: left, y1: top, y2: bottom, stroke: '#a7bad4', 'stroke-dasharray': '4 4', visibility: 'hidden' });
     events.replaceChildren();
@@ -79,30 +110,39 @@
       const row = document.createElement('div'); row.className = 'event';
       const icon = document.createElement('span'); icon.className = `icon ${item.kind}`; icon.textContent = kinds[item.kind][0];
       const time = document.createElement('time'); time.textContent = dateText(item.at);
-      const label = document.createElement('span'); label.textContent = `${item.label} ${kinds[item.kind][1]}`.trim();
+      const label = document.createElement('span'); label.textContent = `${item.label} ${kinds[item.kind][1]}${item.change ? ' · ' + item.change : ''}`.trim();
       row.append(icon, time, label); events.append(row);
     }
     document.getElementById('updated').textContent = history.samples.length ? `最近记录 ${dateText(history.samples.at(-1).at)}` : '';
     document.getElementById('error').textContent = history.error ?? '';
     document.getElementById('error').hidden = !history.error;
   }
-  chart.addEventListener('pointermove', (event) => {
+  const inspect = (event) => {
     if (!visible.length) return;
     const bounds = chart.getBoundingClientRect();
-    const at = start + ((event.clientX - bounds.left) / bounds.width * 900 - left) / (right - left) * (end - start);
-    const nearest = visible.reduce((best, sample) => Math.abs(sample.at - at) < Math.abs(best.at - at) ? sample : best);
-    if (Math.abs(nearest.at - at) > 330000) { tooltip.hidden = true; document.getElementById('hover-line').setAttribute('visibility', 'hidden'); return; }
+    const px = (event.clientX - bounds.left) / bounds.width * width;
+    const py = (event.clientY - bounds.top) / bounds.height * 300;
+    const at = start + (px - left) / (right - left) * (end - start);
+    const nearest = window.trendModel.nearestSample(visible, at, (right - left) / (end - start) * bounds.width / width);
     const line = document.getElementById('hover-line');
-    line.setAttribute('x1', x(nearest.at)); line.setAttribute('x2', x(nearest.at)); line.setAttribute('visibility', 'visible');
-    const value = (key) => Number.isFinite(nearest[key]?.remainingPercent) ? `${Math.round(nearest[key].remainingPercent)}%` : '无记录';
-    tooltip.textContent = `${dateText(nearest.at)}${hasFiveHour ? `\n5 小时剩余 ${value('fiveHour')}` : ''}\n每周剩余 ${value('weekly')}`;
+    if (px < left || px > right || py < top || py > bottom) { tooltip.hidden = true; line.setAttribute('visibility', 'hidden'); return; }
+    if (!nearest) {
+      tooltip.textContent = '此处暂无记录';
+      line.setAttribute('visibility', 'hidden');
+    } else {
+      line.setAttribute('x1', x(nearest.at)); line.setAttribute('x2', x(nearest.at)); line.setAttribute('visibility', 'visible');
+      const value = (key) => Number.isFinite(nearest[key]?.remainingPercent) ? `${Math.round(nearest[key].remainingPercent)}%` : '无记录';
+      tooltip.textContent = `${dateText(nearest.at)}${hasFiveHour ? `\n5 小时剩余 ${value('fiveHour')}` : ''}\n每周剩余 ${value('weekly')}`;
+    }
     tooltip.hidden = false;
     tooltip.style.left = `${Math.max(0, Math.min(bounds.width - tooltip.offsetWidth, event.clientX - bounds.left + 12))}px`;
     tooltip.style.top = `${Math.max(0, event.clientY - bounds.top - tooltip.offsetHeight - 12)}px`;
-  });
+  };
+  chart.addEventListener('pointermove', inspect);
+  chart.addEventListener('click', inspect);
   chart.addEventListener('pointerleave', () => { tooltip.hidden = true; document.getElementById('hover-line')?.setAttribute('visibility', 'hidden'); });
   for (const button of document.querySelectorAll('[data-hours]')) button.addEventListener('click', () => {
-    hours = Number(button.dataset.hours);
+    hours = button.dataset.hours;
     for (const tab of document.querySelectorAll('[data-hours]')) tab.setAttribute('aria-pressed', String(tab === button));
     render();
   });
@@ -111,6 +151,7 @@
     catch { document.getElementById('error').hidden = false; document.getElementById('error').textContent = '历史暂时无法读取，请重新打开趋势窗口。'; }
   };
   window.quota.subscribeHistory(load);
+  new ResizeObserver(render).observe(chart);
   setInterval(load, 60000);
   void load();
 })();
