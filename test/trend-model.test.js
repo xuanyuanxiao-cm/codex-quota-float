@@ -4,7 +4,7 @@ const { autoRange, nearestSample } = require('../dist/renderer/trend-model');
 const minute = 60000;
 const sample = (at, weekly, fiveHour = null, extra = {}) => ({ at: at * minute, weekly: { remainingPercent: weekly }, fiveHour: { remainingPercent: fiveHour }, ...extra });
 
-for (const [duration, span] of [[25, 30], [45, 60], [120, 180]]) {
+for (const [duration, span] of [[25, 30], [45, 50], [120, 132]]) {
   test(`auto range expands ${duration} minutes of concentrated usage into ${span} minutes`, () => {
     const samples = Array.from({ length: duration / 5 + 1 }, (_, i) => sample(i * 5, 100 - 80 * i * 5 / duration));
     const range = autoRange(samples, duration * minute);
@@ -21,10 +21,34 @@ test('30 observed idle minutes separate bursts; both quota windows contribute', 
   assert.equal(range.sessionStart, 35 * minute);
   assert.ok(range.start <= 35 * minute && range.end >= 45 * minute);
 });
-test('failed or missing observations cannot establish an idle period or a measured drop', () => {
-  const samples = [sample(0, 100), sample(5, 90), sample(50, 50, null, { gapBefore: true }), sample(55, 40)];
-  assert.equal(autoRange(samples, 55 * minute).sessionStart, 0);
-  assert.equal(autoRange([sample(0, 100), sample(60, 10)], 60 * minute).sessionStart, 0, 'fall back to recorded extent');
+test('short missing observations do not establish idle time or a measured drop', () => {
+  const samples = [sample(0, 100), sample(5, 90), sample(20, 50, null, { gapBefore: true }), sample(25, 40)];
+  assert.equal(autoRange(samples, 25 * minute).sessionStart, 0);
+});
+test('long recording interruptions select the newest segment, even before its first measured drop', () => {
+  const old = [sample(0, 100), sample(5, 90)];
+  const previous = autoRange(old, 5 * minute);
+  for (const gap of [30, 60, 1440]) {
+    const resumed = 5 + gap;
+    const samples = [...old, sample(resumed, 80, null, { gapBefore: true })];
+    const range = autoRange(samples, resumed * minute, previous);
+    assert.equal(range.sessionStart, resumed * minute);
+    assert.equal(range.end - range.start, 30 * minute);
+    samples.push(sample(resumed + 5, 70));
+    assert.equal(autoRange(samples, (resumed + 5) * minute, range).sessionStart, resumed * minute);
+  }
+});
+test('multi-day history focuses the latest two-hour burst rather than rounding up to seven days', () => {
+  const recent = Array.from({ length: 27 }, (_, i) => sample(2880 + i * 5, 100 - i, i < 18 ? 100 - i * 5 : null, { gapBefore: i === 0 || i === 18 }));
+  const range = autoRange([sample(0, 100), sample(5, 90), sample(1440, 80), sample(1445, 70), ...recent], 3010 * minute);
+  assert.equal(range.sessionStart, 2880 * minute);
+  assert.ok(range.end - range.start < 150 * minute);
+  assert.ok(range.start <= recent[0].at && range.end >= recent.at(-1).at);
+});
+test('continuous usage over 24 hours gets proportional padding instead of a seven-day bucket', () => {
+  const samples = Array.from({ length: 301 }, (_, i) => sample(i * 5, 100 - i / 4));
+  const range = autoRange(samples, 1500 * minute);
+  assert.equal(range.end - range.start, 1650 * minute);
 });
 test('continued consumption only expands the current automatic viewport', () => {
   const samples = [sample(0, 100), sample(5, 90)];

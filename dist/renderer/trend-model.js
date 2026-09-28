@@ -5,8 +5,15 @@
   const value = (sample, key) => sample?.[key]?.remainingPercent;
   function autoRange(samples, now, previous) {
     let episode = null, latest = null, idleSince = null;
+    let segmentStart = samples[0]?.at;
     for (let i = 1; i < samples.length; i++) {
       const a = samples[i - 1], b = samples[i];
+      if (b.at - a.at >= 30 * MINUTE) {
+        // A recording interruption starts a new segment without claiming inactivity.
+        episode = latest = idleSince = null;
+        segmentStart = b.at;
+        continue;
+      }
       const comparable = keys.filter(key => Number.isFinite(value(a, key)) && Number.isFinite(value(b, key)));
       const missing = keys.some(key => Number.isFinite(value(a, key)) !== Number.isFinite(value(b, key)));
       if (b.gapBefore || b.at - a.at > 11 * MINUTE || !comparable.length || missing) {
@@ -24,11 +31,11 @@
         if (b.at - idleSince >= 30 * MINUTE) episode = null;
       }
     }
-    const first = latest?.start ?? samples[0]?.at ?? now - 30 * MINUTE;
+    const first = latest?.start ?? segmentStart ?? now - 30 * MINUTE;
     const last = latest?.end ?? samples.at(-1)?.at ?? now;
-    const padding = samples.length ? 2.5 * MINUTE : 0;
+    const padding = samples.length ? Math.max(2.5 * MINUTE, (last - first) * .05) : 0;
     const extent = last - first + 2 * padding;
-    const span = ([30, 60, 120, 180, 360, 720, 1440, 10080].find(n => n * MINUTE >= extent) ?? Math.ceil(extent / MINUTE)) * MINUTE;
+    const span = Math.max(30 * MINUTE, extent);
     let end = last + padding, start = end - span;
     if (previous?.sessionStart === first) {
       start = Math.min(start, previous.start);

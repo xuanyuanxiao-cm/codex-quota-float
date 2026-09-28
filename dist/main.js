@@ -172,8 +172,10 @@ function startCompanion(deps = loadElectronDeps()) {
     controller.subscribe((state) => {
         refreshing = state.status === 'loading';
         const result = alerts?.update(state);
-        if (history?.record(state)) sendToWindow(trendsWindow, 'quota:history-updated');
+        const historyChanged = history?.record(state);
+        const windowsChanged = state.hasFiveHour !== latestState?.hasFiveHour;
         latestState = result ? { ...state, alerts: result.alerts } : state;
+        if (historyChanged || windowsChanged) sendToWindow(trendsWindow, 'quota:history-updated');
         notices?.updateAccount(state);
         sendToWindow(window, 'quota:state', latestState);
     });
@@ -196,7 +198,7 @@ function startCompanion(deps = loadElectronDeps()) {
             void trendsWindow.loadFile(node_path_1.default.join(__dirname, 'renderer', 'trends.html'));
         };
         deps.ipcMain.handle('quota:open-trends', showTrends);
-        deps.ipcMain.handle('quota:read-history', () => history.read());
+        deps.ipcMain.handle('quota:read-history', () => ({ ...history.read(), hasFiveHour: latestState?.hasFiveHour ?? null }));
         const alertsPath = node_path_1.default.join(deps.app.getPath('userData'), 'codex-quota-float-alerts.json');
         let savedAlerts = {};
         try { savedAlerts = JSON.parse((0, node_fs_1.readFileSync)(alertsPath, 'utf8')) ?? {}; } catch {}

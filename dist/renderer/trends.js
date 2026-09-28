@@ -7,6 +7,7 @@
   const NS = 'http://www.w3.org/2000/svg';
   let hours = 'auto';
   let automaticRange;
+  let rangeHasFiveHour;
   let history = { samples: [], now: Date.now() };
   let visible = [];
   let hasFiveHour = false;
@@ -25,7 +26,12 @@
     return node;
   }
   function render() {
-    const samples = history.samples.filter(sample => sample.at <= history.now).sort((a, b) => a.at - b.at);
+    if (rangeHasFiveHour !== history.hasFiveHour) {
+      automaticRange = undefined;
+      rangeHasFiveHour = history.hasFiveHour;
+    }
+    const samples = history.samples.filter(sample => sample.at <= history.now).sort((a, b) => a.at - b.at)
+      .map(sample => history.hasFiveHour === false ? { ...sample, fiveHour: null, events: { weekly: sample.events?.weekly }, manualReset: sample.events?.weekly === 'manual' } : sample);
     if (hours === 'auto') {
       automaticRange = window.trendModel.autoRange(samples, history.now, automaticRange);
       ({ start, end } = automaticRange);
@@ -34,7 +40,7 @@
     width = chart.getBoundingClientRect().width || 900;
     right = width - 110;
     chart.setAttribute('viewBox', `0 0 ${width} 300`);
-    document.getElementById('time-range').textContent = `${hours === 'auto' ? '自动 · 最近一段消耗' : '固定范围'}　${dateText(start)} — ${dateText(end)}`;
+    document.getElementById('time-range').textContent = `${hours === 'auto' ? '自动 · 最近一段记录' : '固定范围'}　${dateText(start)} — ${dateText(end)}`;
     hasFiveHour = visible.some((sample) => Number.isFinite(sample.fiveHour?.remainingPercent));
     document.getElementById('five-hour-legend').hidden = !hasFiveHour;
     chart.replaceChildren();
@@ -74,16 +80,19 @@
       }
       svg('path', { d: path, fill: 'none', stroke: color, 'stroke-width': 2.5, 'stroke-linejoin': 'round' });
       const latest = visible.findLast(sample => Number.isFinite(sample[key]?.remainingPercent));
-      if (latest) endpoints.push({ key, color, sample: latest, cy: y(latest[key].remainingPercent) });
+      if (latest) endpoints.push({ key, color, sample: latest, cy: y(latest[key].remainingPercent), stale: latest.at < visible.at(-1).at || history.now - latest.at > 660000 });
     }
     endpoints.sort((a, b) => a.cy - b.cy);
-    if (endpoints.length === 2 && endpoints[1].cy - endpoints[0].cy < 18) {
-      endpoints[0].labelY = Math.max(top + 4, Math.min(bottom - 18, endpoints[0].cy - 9));
-      endpoints[1].labelY = endpoints[0].labelY + 18;
+    const labelGap = endpoints.some(point => point.stale) ? 34 : 18;
+    if (endpoints.length === 2 && endpoints[1].cy - endpoints[0].cy < labelGap) {
+      endpoints[0].labelY = Math.max(top + 4, Math.min(bottom - 14 - labelGap, endpoints[0].cy - labelGap / 2));
+      endpoints[1].labelY = endpoints[0].labelY + labelGap;
     }
     for (const point of endpoints) {
       svg('circle', { cx: x(point.sample.at), cy: point.cy, r: 3.5, fill: point.color, 'data-latest-point': point.key });
-      svg('text', { x: right + 8, y: point.labelY ?? Math.min(bottom, point.cy + 4), style: 'fill:#ecf4ff', 'data-latest-value': point.key }, `${point.key === 'fiveHour' ? '5 小时' : '周'} ${Math.round(point.sample[point.key].remainingPercent)}%`);
+      const labelY = point.labelY ?? Math.min(bottom - (point.stale ? 14 : 0), point.cy + 4);
+      svg('text', { x: right + 8, y: labelY, style: 'fill:#ecf4ff', 'data-latest-value': point.key }, `${point.key === 'fiveHour' ? '5 小时' : '周'} ${Math.round(point.sample[point.key].remainingPercent)}%`);
+      if (point.stale) svg('text', { x: right + 8, y: labelY + 14, style: 'font-size:10px', 'data-latest-time': point.key }, `记录 ${dateText(point.sample.at)}`);
     }
     const eventItems = [];
     for (const sample of visible) {
