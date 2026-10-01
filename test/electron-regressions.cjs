@@ -24,6 +24,7 @@ const screen = new EventEmitter();
 let height = 500;
 screen.getDisplayNearestPoint = () => ({ workArea: { x: 0, y: 0, width: 960, height } });
 startCompanion({ ...electron, screen,
+    tiboOptions: require('./tibo-fixtures.cjs').offlineTibo,
   noticeOptions: { loadCommunity: async () => { throw Error('Offline fixture'); } },
   BrowserWindow: class extends BrowserWindow {
     constructor(options) { super({ ...options, show: false }); windows.push(this); }

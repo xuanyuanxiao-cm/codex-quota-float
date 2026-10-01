@@ -162,6 +162,26 @@ class ResetNotices {
             note: `补录范围 ${seed.requestedFrom?.slice(0, 10)} 至 ${seed.requestedTo?.slice(0, 10)}；存档有原帖链接的候选 ${seed.records?.length || 0} 条。覆盖不完整，尤其缺少部分回复和服务动态；无原帖链接的事件未冒充可核验消息。` };
         this.prune(); return added;
     }
+    importTiboPost(post) {
+        if (!postUrl(post.url) || post.id !== post.url.split('/').at(-1) || !post.originalText || post.type === 'repost') return;
+        const result = classifyPost(post.originalText);
+        if (result.kind === 'unrelated') return;
+        const existing = this.saved.records.find(r => r.id === post.id);
+        if (existing?.originalText === post.originalText && (!post.chineseText || existing.chineseText === post.chineseText)) return;
+        const before = structuredClone(this.saved.records);
+        const changed = existing?.originalText && existing.originalText !== post.originalText;
+        const firstOriginal = !existing?.originalText;
+        const record = existing || { id: post.id, url: post.url, publishedAt: post.publishedAt, firstSeenAt: this.now(), revision: 1, read: !post.eligible, eligible: Boolean(post.eligible), source: 'tibo' };
+        Object.assign(record, result, { text: post.originalText, originalText: post.originalText, verified: true, verificationStatus: 'verified', verifiedAt: this.now(), needsRecheck: false });
+        if (firstOriginal && !record.manualReadAt) record.read = !(post.eligible || record.eligible);
+        if (changed) { record.revision++; record.read = false; record.chineseText = null; }
+        if (post.chineseText) { record.chineseText = post.chineseText; record.translationOriginalText = post.originalText; }
+        record.deadlineAt = explicitDeadline(post.originalText);
+        record.processingReason = record.read ? '历史收录或已手动标记' : 'Tibo 原帖已读取，等待手动标记';
+        if (!existing) this.saved.records.push(record);
+        if (!this.persist()) this.saved.records = before;
+        this.emit();
+    }
     updateAccount(state) {
         if (state.status !== 'ready') { this.account = this.account ? { ...this.account, stale: true } : null; this.emit(); return; }
         const available = state.resetCredits?.credits?.filter(c => c.status === 'available' && (!Number.isFinite(c.expiresAt) || (c.expiresAt < 1e11 ? c.expiresAt * 1000 : c.expiresAt) > this.now()));

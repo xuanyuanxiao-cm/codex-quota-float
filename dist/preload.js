@@ -24,6 +24,23 @@ const subscribeOpenDetails = (listener) => {
     return () => electron_1.ipcRenderer.removeListener('quota:open-details', handler);
 };
 electron_1.contextBridge.exposeInMainWorld('quota', {
+    openTibo: (id) => electron_1.ipcRenderer.invoke('quota:open-tibo', id),
+    readTibo: () => electron_1.ipcRenderer.invoke('quota:read-tibo'),
+    refreshTibo: () => electron_1.ipcRenderer.invoke('quota:refresh-tibo'),
+    markTiboRead: (items) => electron_1.ipcRenderer.invoke('quota:mark-tibo-read', items),
+    clearTibo: () => electron_1.ipcRenderer.invoke('quota:clear-tibo'),
+    translateTibo: (id) => electron_1.ipcRenderer.invoke('quota:translate-tibo', id),
+    openTiboSource: (id) => electron_1.ipcRenderer.invoke('quota:open-tibo-source', id),
+    subscribeTibo: (listener) => {
+        const handler = (_event, state) => listener(state);
+        electron_1.ipcRenderer.on('quota:tibo', handler);
+        return () => electron_1.ipcRenderer.removeListener('quota:tibo', handler);
+    },
+    subscribeTiboSelection: (listener) => {
+        const handler = (_event, id) => listener(id);
+        electron_1.ipcRenderer.on('quota:select-tibo', handler);
+        return () => electron_1.ipcRenderer.removeListener('quota:select-tibo', handler);
+    },
     dismissAlert: (category) => electron_1.ipcRenderer.invoke('quota:dismiss-alert', category),
     subscribeWorkAreaHeight: (listener) => {
         const handler = (_event, height) => listener(height);

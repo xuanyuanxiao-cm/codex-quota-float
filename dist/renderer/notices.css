@@ -1,4 +1,8 @@
 :root { color-scheme: dark; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #ecf4ff; background: #101b30; }
+.feed-nav { display: flex; gap: 18px; border-bottom: 1px solid #2d3c53; margin-bottom: 20px; }
+.feed-nav button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 9px 0 12px; background: transparent; color: #a7bad4; }
+.feed-nav button[aria-current="page"] { color: #eeeaff; border-bottom-color: #b7afff; }
+.feed-nav span { margin-left: 5px; color: #c4b5fd; font-size: 11px; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 main { padding: 18px; max-width: 720px; margin: auto; }

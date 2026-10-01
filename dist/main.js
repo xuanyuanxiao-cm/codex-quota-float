@@ -21,6 +21,8 @@ const { UsageHistory } = require('./history');
 const { CodexAutoStart } = require('./auto-start');
 const { ResetNotices, postUrl, scrape } = require('./notices');
 const { fetchCommunity } = require('./community-reset');
+const { TiboFeed } = require('./tibo-feed');
+const { createTiboSource, canonicalUrl } = require('./tibo-source');
 function registerQuotaActions(ipcMain, controller, dialog, getWindow) {
     let pendingReset;
     const requestReset = (creditId) => {
@@ -145,6 +147,8 @@ function startCompanion(deps = loadElectronDeps()) {
     let trendsWindow;
     let notices;
     let noticesWindow;
+    let noticesPage = 'notices', selectedMessage;
+    let tibo;
     let autoStart;
     let changingAutoStart = false;
     const stopResources = () => {
@@ -155,6 +159,7 @@ function startCompanion(deps = loadElectronDeps()) {
         tray = undefined;
         controller.stop();
         notices?.stop();
+        tibo?.stop();
         if (dragTimer)
             clearInterval(dragTimer);
         if (onDisplayChanged) {
@@ -210,21 +215,29 @@ function startCompanion(deps = loadElectronDeps()) {
             latestState = { ...latestState, alerts: alerts.dismiss(category) };
             sendToWindow(window, 'quota:state', latestState);
         });
-        const showNotices = (_event, id) => {
-            const select = () => { if (typeof id === 'string') sendToWindow(noticesWindow, 'quota:select-notice', id); };
+        const showNotices = (_event, id, page = 'notices') => {
+            selectedMessage = id;
+            const select = () => { if (typeof selectedMessage === 'string') sendToWindow(noticesWindow, noticesPage === 'tibo' ? 'quota:select-tibo' : 'quota:select-notice', selectedMessage); };
             if (noticesWindow && !noticesWindow.isDestroyed()) {
                 if (noticesWindow.isMinimized()) noticesWindow.restore();
-                noticesWindow.show(); noticesWindow.focus(); select(); return;
+                noticesWindow.show(); noticesWindow.focus();
+                if (noticesPage !== page) {
+                    noticesPage = page;
+                    noticesWindow.setTitle?.(`${page === 'tibo' ? 'Tibo 动态' : '重置动态'} · Codex Quota Float`);
+                    void noticesWindow.loadFile(node_path_1.default.join(__dirname, 'renderer', `${page}.html`));
+                } else select();
+                return;
             }
+            noticesPage = page;
             noticesWindow = new deps.BrowserWindow({
                 width: 470, height: 720, minWidth: 380, minHeight: 440,
-                title: '重置动态 · Codex Quota Float', backgroundColor: '#101b30', autoHideMenuBar: true,
+                title: `${page === 'tibo' ? 'Tibo 动态' : '重置动态'} · Codex Quota Float`, backgroundColor: '#101b30', autoHideMenuBar: true,
                 icon: node_path_1.default.join(__dirname, '..', 'assets', 'codex-quota-float.ico'),
                 webPreferences: { preload: node_path_1.default.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
             });
             noticesWindow.on('closed', () => { noticesWindow = undefined; });
             noticesWindow.webContents.on?.('did-finish-load', select);
-            void noticesWindow.loadFile(node_path_1.default.join(__dirname, 'renderer', 'notices.html'));
+            void noticesWindow.loadFile(node_path_1.default.join(__dirname, 'renderer', `${page}.html`));
         };
         notices = new ResetNotices(node_path_1.default.join(deps.app.getPath('userData'), 'codex-reset-notices.json'), {
             loadCommunity: options => fetchCommunity({ ...options, fetchImpl: deps.net?.fetch.bind(deps.net) || fetch }),
@@ -236,6 +249,22 @@ function startCompanion(deps = loadElectronDeps()) {
             },
         });
         if (deps.app.isPackaged) notices.importArchive(require('./reset-history-seed.json'));
+        tibo = new TiboFeed(node_path_1.default.join(deps.app.getPath('userData'), 'codex-tibo-feed.json'), {
+            source: createTiboSource({ fetchImpl: deps.net?.fetch.bind(deps.net) }),
+            ...deps.tiboOptions,
+            onRelated: record => notices.importTiboPost(record),
+            onChange: state => { sendToWindow(window, 'quota:tibo', state); sendToWindow(noticesWindow, 'quota:tibo', state); },
+        });
+        deps.ipcMain.handle('quota:open-tibo', (_event, id) => showNotices(_event, id, 'tibo'));
+        deps.ipcMain.handle('quota:read-tibo', () => tibo.view());
+        deps.ipcMain.handle('quota:refresh-tibo', () => tibo.refresh(true));
+        deps.ipcMain.handle('quota:mark-tibo-read', (_event, items) => tibo.markRead(items));
+        deps.ipcMain.handle('quota:clear-tibo', () => tibo.clear());
+        deps.ipcMain.handle('quota:translate-tibo', (_event, id) => tibo.translatePost(id));
+        deps.ipcMain.handle('quota:open-tibo-source', (_event, id) => {
+            const record = tibo.view().records.find(r => r.id === id);
+            if (record && canonicalUrl(record.url)) return deps.shell?.openExternal(record.url);
+        });
         deps.ipcMain.handle('quota:open-notices', showNotices);
         deps.ipcMain.handle('quota:read-notices', () => notices.view());
         deps.ipcMain.handle('quota:refresh-notices', () => notices.refresh(true));
@@ -252,7 +281,7 @@ function startCompanion(deps = loadElectronDeps()) {
             if (record && postUrl(record.url)) return deps.shell?.openExternal(record.url);
         });
         // Unit tests use minimal Electron doubles; start networking only in a real runtime.
-        if (deps.app.isPackaged !== undefined) notices.start();
+        if (deps.app.isPackaged !== undefined) { notices.start(); tibo.start(); }
         window = createMainWindow(deps.BrowserWindow);
         window.on('close', (event) => {
             if (!resourcesStopped) {

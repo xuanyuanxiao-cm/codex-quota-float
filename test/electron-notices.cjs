@@ -31,6 +31,7 @@ AppServerClient.prototype.consumeRateLimitResetCredit = async () => { throw new 
 const windows = [], notifications = [], handlers = new Map(), opened = [];
 let shape;
 startCompanion({ ...electron,
+    tiboOptions: require('./tibo-fixtures.cjs').offlineTibo,
     noticeOptions: { now: () => now, canVerify: () => true, loadCommunity: async () => {
         if (communityFail) throw new Error('offline');
         const data = snapshot(Math.min(now, Date.now()), items);
@@ -96,7 +97,7 @@ async function capture(win, name) {
     assert.equal(await evaluate(windows[1], 'document.getElementById("sync-status").hidden && document.getElementById("sync-reason").hidden'), true, 'successful checks show timestamps without redundant cooling messages');
     const folds = () => evaluate(windows[1], `['account-fold','history-fold'].map(id => document.getElementById(id).open)`);
     assert.deepEqual(await evaluate(windows[1], 'Array.from(document.querySelectorAll("details[open]")).map(element => element.id)'), ['detail'], 'announcement details open while community explanation stays collapsed');
-    assert.equal(await evaluate(windows[1], 'document.querySelector("main").children[1].id'), 'sync-panel');
+    assert.equal(await evaluate(windows[1], 'document.querySelector("main > header").nextElementSibling.id'), 'sync-panel');
     assert.equal(await evaluate(windows[1], 'document.getElementById("sync-panel").tagName'), 'SECTION', 'check status is always visible without a disclosure control');
     await evaluate(windows[1], `['forecast-fold','detail'].forEach(id => document.getElementById(id).querySelector('summary').click())`);
     await handlers.get('quota:refresh-now')();

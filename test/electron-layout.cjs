@@ -26,6 +26,7 @@ const shapes = [];
 const nativeActions = new Map();
 const dragActions = [];
 startCompanion({
+  tiboOptions: require('./tibo-fixtures.cjs').offlineTibo,
   ...electron,
   noticeOptions: { loadCommunity: async () => { throw Error('Offline fixture'); } },
   BrowserWindow: class extends BrowserWindow {
@@ -85,11 +86,10 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   const normalHeight = Math.ceil(await evaluate(`document.querySelector('[data-quota-app]').getBoundingClientRect().height`));
   assert.ok(matchesHeight(normalHeight));
   assert.deepEqual(dragActions, ['quota:start-drag', 'quota:stop-drag'], 'a normal mouse click must release the drag timer');
-  assert.ok(normalHeight < 620, 'ordinary details including forecast and trends remain compact');
+  assert.ok(normalHeight < 680, 'details including forecast, trends and the independent Tibo entry remain compact');
   assert.equal(hit(140, 60), false);
   assert.equal(hit(140, 105), false);
   assert.equal(hit(140, 180), true);
-  const normalY = quotaWindow.getBounds().y;
 
   assert.equal(await evaluate(`document.querySelector('[data-plan]').textContent`), 'Plus');
   const dualWindows = fixture.rateLimits;
@@ -119,6 +119,8 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
     isResetting: false, lastUpdatedAt: Date.now(), errorMessage: null,
   });
   await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  await waitFor(() => matchesHeight(layouts.at(-1).height), 'settled details before opening picker');
+  const normalY = quotaWindow.getBounds().y;
   await evaluate(`document.querySelector('[data-action="reset"]').click()`);
   await waitFor(() => layouts.at(-1)?.mode === 'picker', 'picker layout');
   assert.equal(quotaWindow.getBounds().height, 360);
@@ -127,7 +129,9 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   await evaluate(`document.querySelector('[data-action="cancel-reset"]').click()`);
   await waitFor(() => layouts.at(-1)?.mode === 'normal', 'restored normal layout');
   assert.ok(matchesHeight(Math.ceil(await evaluate(`document.querySelector('[data-quota-app]').getBoundingClientRect().height`))));
-  assert.equal(quotaWindow.getBounds().y, normalY);
+  const restoredBounds = quotaWindow.getBounds();
+  const restoredArea = electron.screen.getDisplayMatching(restoredBounds).workArea;
+  assert.equal(restoredBounds.y, Math.min(normalY, restoredArea.y + restoredArea.height - restoredBounds.height), 'restore keeps the anchor unless the taller panel must fit above the screen edge');
   assert.equal(hit(140, Math.ceil(await evaluate(`document.querySelector('[data-quota-app]').getBoundingClientRect().height`)) + 2), false);
 
   // A message can change height without a click. ResizeObserver must update the native bounds.

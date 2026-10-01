@@ -128,6 +128,10 @@ body { color: var(--ink); overflow: hidden; }
 .probability-tag[data-tone="neutral"] { color: #b4c2d4; }
 .notice-button { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; width: 100%; padding: 9px; border: 1px solid #285767; border-radius: 8px; background: #122b39; color: #d9f8f7; text-align: left; font: inherit; font-size: .78rem; cursor: pointer; }
 .notice-button [data-notice-summary] { color: #9ebdc9; font-size: .7rem; }
+.tibo-button { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; width: 100%; padding: 9px; border: 1px solid #454669; border-radius: 8px; background: #22263d; color: #eeeaff; text-align: left; font: inherit; font-size: .78rem; cursor: pointer; }
+.tibo-button > span { display: flex; justify-content: space-between; align-items: center; }
+.tibo-button small { color: #b3b0cd; font-size: .7rem; }
+.tibo-button b { padding: 1px 6px; border-radius: 5px; background: #433f70; color: #e5dfff; font-size: 11px; }
 .probability-tag { display: block; flex-shrink: 0; margin: 8px 0 0 auto; width: 76px; height: 23px; padding: 0; border: 1px solid #354a63; border-radius: 12px; background: #132035; color: #dce7f4; font: inherit; font-size: 10px; cursor: pointer; }
 .probability-tag[hidden], .is-picking .probability-tag, .is-edge-hidden .probability-tag { display: none; }
 .probability-panel { display: block; width: 100%; margin-top: 10px; padding: 9px; border: 1px solid #3c566f; border-radius: 9px; background: #15263b; color: #ecf4ff; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }

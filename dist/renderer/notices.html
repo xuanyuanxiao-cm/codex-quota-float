@@ -1,8 +1,9 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self' data:">
-<title>重置动态</title><link rel="stylesheet" href="notices.css"><script defer src="notice-presentation.js"></script><script defer src="notices.js"></script></head>
-<body><main>
+<title>重置动态</title><link rel="stylesheet" href="notices.css"><script defer src="notice-presentation.js"></script><script defer src="feed-nav.js"></script><script defer src="notices.js"></script></head>
+<body data-feed-page="notices"><main>
+<nav class="feed-nav" aria-label="消息分类"><button id="nav-notices" type="button" aria-current="page">重置消息 <span id="nav-notices-count"></span></button><button id="nav-tibo" type="button">Tibo 动态 <span id="nav-tibo-count"></span></button></nav>
 <header><h1>重置动态</h1><button id="check" disabled>正在读取…</button></header>
 <section class="fold" id="sync-panel" aria-label="动态检查状态"><div class="section-heading"><span id="sync-title">检查状态</span><span id="sync-mode" class="muted"></span></div><p id="sync-status" role="status">正在读取…</p><p id="sync-reason" class="muted"></p><div class="sync-times muted"><span id="sync-last"></span><span id="sync-next"></span></div><p class="muted" id="checked">正在读取…</p><p id="error" role="status" hidden></p></section>
 <details class="forecast-card" id="forecast-fold" aria-label="社区预测与公告进展"><summary><span class="forecast-line"><span id="forecast-heading">社区预测 · 未来 24h</span><strong id="forecast-value">—</strong></span></summary><p id="forecast-note">等待社区数据</p><dl id="forecast-evidence"></dl><p class="muted" id="forecast-account-note"></p><details id="forecast-basis"><summary>来源与预测口径</summary><p id="forecast-basis-text" class="muted"></p><p class="muted">来源：Codex Reset Observatory（非官方）。预测额外重置或发卡事件，不代表本账户必然到账。准确性尚未由本应用验证；明确公告优先显示进展。数据超过 6 小时或来源异常时暂停显示概率。</p></details></details>

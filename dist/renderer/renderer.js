@@ -132,6 +132,7 @@
     const expirySummary = root.querySelector("[data-expiry-summary]");
     const trendsButton = root.querySelector('[data-action="trends"]');
     const noticesButton = root.querySelector('[data-action="notices"]');
+    const tiboButton = root.querySelector('[data-action="tibo"]');
     const orbNotice = root.querySelector('[data-orb-notice]');
     const noticeSummary = root.querySelector('[data-notice-summary]');
     const probabilityTag = root.querySelector('[data-probability-tag]');
@@ -465,6 +466,17 @@
     trendsButton?.addEventListener("click", onTrends);
     const onNotices = () => { void api.openNotices?.(); };
     noticesButton?.addEventListener("click", onNotices);
+    const onTibo = () => { void api.openTibo?.(); };
+    tiboButton?.addEventListener('click', onTibo);
+    const renderTibo = state => {
+      const badge = root.querySelector('[data-tibo-badge]');
+      const summary = root.querySelector('[data-tibo-summary]');
+      if (badge) { badge.hidden = !state.unread; badge.textContent = state.unread > 99 ? '99+' : String(state.unread || 0); badge.setAttribute('aria-label', `${state.unread || 0} 条未读动态`); }
+      if (summary) summary.textContent = state.error ? '同步失败 · 点击查看' : !state.configured ? '待配置数据源 · 点击查看' : state.loading ? '正在同步动态…' : '最近 30 天 · 中文阅读';
+      syncWindowLayout();
+    };
+    const unsubscribeTibo = api.subscribeTibo?.(renderTibo);
+    api.readTibo?.().then(renderTibo).catch(() => {});
     orbNotice?.addEventListener('click', onNotices);
     orbLow?.addEventListener('click', openQuotaDetails);
     orbRecovered?.addEventListener('click', openQuotaDetails);
@@ -526,6 +538,8 @@
       unsubscribeEdgeHidden();
       unsubscribeOpenDetails?.();
       unsubscribeNotices?.();
+      unsubscribeTibo?.();
+      tiboButton?.removeEventListener('click', onTibo);
       noticesButton?.removeEventListener("click", onNotices);
       orbNotice?.removeEventListener('click', onNotices);
       orbLow?.removeEventListener('click', openQuotaDetails);

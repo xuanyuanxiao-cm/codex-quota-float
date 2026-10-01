@@ -31,6 +31,7 @@ let quotaWindow;
 let shape = [];
 let trayMenu;
 startCompanion({
+  tiboOptions: require('./tibo-fixtures.cjs').offlineTibo,
   ...electron,
   noticeOptions: { loadCommunity: async () => { throw Error('Offline fixture'); } },
   Notification: class extends EventEmitter {

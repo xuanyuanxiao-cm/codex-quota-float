@@ -1,0 +1,21 @@
+header { margin-top: 22px; }
+header p { margin: 5px 0 0; }
+.feed-status { margin: 16px 0; }
+.feed-status p { margin: 6px 0; }
+#read-all { padding: 6px 10px; font-size: 11px; }
+.feed-post { margin-top: 16px; padding: 16px 0 4px; border-top: 1px solid #2d3c53; }
+.post-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: #a7bad4; font-size: 11px; }
+.post-unread { margin-left: auto; color: #c4b5fd; }
+.post-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0; font-size: 14px; line-height: 1.8; }
+.post-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.post-actions button { padding: 6px 9px; font-size: 11px; }
+.post-translation { color: #91a8c1; font-size: 11px; }
+.post-original { white-space: pre-wrap; overflow-wrap: anywhere; color: #bdcde0; font-size: 13px; }
+.post-context { padding: 10px 12px; background: #172a40; border-radius: 8px; margin: 12px 0; }
+.post-context p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin: 6px 0; }
+.post-related { color: #67e8e2; }
+.post-selected { border-left: 2px solid #b7afff; padding-left: 12px; }
+#more { display: block; margin: 20px auto; }
+#coverage { margin-top: 20px; }
+#clear-confirm { margin-top: 10px; }
+button:focus-visible { outline-color: #c4b5fd; }

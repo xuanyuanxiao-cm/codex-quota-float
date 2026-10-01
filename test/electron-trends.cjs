@@ -25,6 +25,7 @@ let overrideHistory;
 const handlers = new Map();
 const errors = [];
 startCompanion({
+  tiboOptions: require('./tibo-fixtures.cjs').offlineTibo,
   ...electron,
   noticeOptions: { loadCommunity: async () => { throw Error('Offline fixture'); } },
   Notification: undefined,
