@@ -229,8 +229,9 @@ function startCompanion(deps = loadElectronDeps()) {
                 return;
             }
             noticesPage = page;
+            const readingArea = deps.screen?.getDisplayMatching?.(window.getBounds())?.workArea;
             noticesWindow = new deps.BrowserWindow({
-                width: 470, height: 720, minWidth: 380, minHeight: 440,
+                width: Math.max(380, Math.min(900, (readingArea?.width || 940) - 40)), height: Math.max(440, Math.min(720, (readingArea?.height || 760) - 40)), minWidth: 380, minHeight: 440,
                 title: `${page === 'tibo' ? 'Tibo 动态' : '重置动态'} · Codex Quota Float`, backgroundColor: '#101b30', autoHideMenuBar: true,
                 icon: node_path_1.default.join(__dirname, '..', 'assets', 'codex-quota-float.ico'),
                 webPreferences: { preload: node_path_1.default.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
@@ -242,6 +243,7 @@ function startCompanion(deps = loadElectronDeps()) {
         notices = new ResetNotices(node_path_1.default.join(deps.app.getPath('userData'), 'codex-reset-notices.json'), {
             loadCommunity: options => fetchCommunity({ ...options, fetchImpl: deps.net?.fetch.bind(deps.net) || fetch }),
             scrapePage: (url, options) => scrape(url, { ...options, fetchImpl: deps.net?.fetch.bind(deps.net) || fetch }),
+            translateOriginal: (record, options) => tibo.source.hydrate(record, options),
             ...deps.noticeOptions,
             onChange: (state) => {
                 sendToWindow(window, 'quota:notices', state);
@@ -261,6 +263,7 @@ function startCompanion(deps = loadElectronDeps()) {
         deps.ipcMain.handle('quota:mark-tibo-read', (_event, items) => tibo.markRead(items));
         deps.ipcMain.handle('quota:clear-tibo', () => tibo.clear());
         deps.ipcMain.handle('quota:translate-tibo', (_event, id) => tibo.translatePost(id));
+        deps.ipcMain.handle('quota:prioritize-tibo', (_event, id) => tibo.prioritize(id));
         deps.ipcMain.handle('quota:open-tibo-source', (_event, id) => {
             const record = tibo.view().records.find(r => r.id === id);
             if (record && canonicalUrl(record.url)) return deps.shell?.openExternal(record.url);
@@ -268,6 +271,7 @@ function startCompanion(deps = loadElectronDeps()) {
         deps.ipcMain.handle('quota:open-notices', showNotices);
         deps.ipcMain.handle('quota:read-notices', () => notices.view());
         deps.ipcMain.handle('quota:refresh-notices', () => notices.refresh(true));
+        deps.ipcMain.handle('quota:translate-notice', (_event, id) => notices.translatePost(id));
         deps.ipcMain.handle('quota:read-notice', (_event, id) => notices.markRead(id));
         deps.ipcMain.handle('quota:read-notices-batch', (_event, items) => notices.markReadBatch(items));
         deps.ipcMain.handle('quota:show-probability', (_event, show) => {

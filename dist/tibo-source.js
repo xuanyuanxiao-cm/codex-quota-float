@@ -29,7 +29,7 @@ function createTiboSource({ fetchImpl = fetch } = {}) {
     async function request(path, signal) {
         const timeout = AbortSignal.timeout(30000);
         const response = await fetchImpl(`https://api.fxtwitter.com/2/${path}`, {
-            headers: { 'User-Agent': 'CodexQuotaFloat/0.1.18 (personal timeline reader)', Accept: 'application/json' },
+            headers: { 'User-Agent': 'CodexQuotaFloat/0.1.20 (personal timeline reader)', Accept: 'application/json' },
             signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
         if (response.status === 204) return { code: 200, results: [], cursor: {} };

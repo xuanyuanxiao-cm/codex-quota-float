@@ -15,7 +15,8 @@ app.whenReady().then(async () => {
     const feed = new TiboFeed(path.join(__dirname, '../release/tibo-preview/live-feed.json'));
     ipcMain.handle('quota:read-tibo', () => feed.view());
     ipcMain.handle('quota:read-notices', () => ({ unread: 0 }));
-    const win = new BrowserWindow({ width: 620, height: 920, show: false, webPreferences: { preload: path.join(__dirname, '../dist/preload.js'), contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false } });
+    ipcMain.handle('quota:prioritize-tibo', () => {});
+    const win = new BrowserWindow({ width: 900, height: 720, show: false, webPreferences: { preload: path.join(__dirname, '../dist/preload.js'), contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false } });
     await win.loadFile(path.join(__dirname, '../dist/renderer/tibo.html'));
     await new Promise(resolve => setTimeout(resolve, 500));
     const layout = await win.webContents.executeJavaScript('({ posts:document.querySelectorAll(".feed-post").length, overflow:document.body.scrollWidth>innerWidth })');

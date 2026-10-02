@@ -30,6 +30,8 @@ electron_1.contextBridge.exposeInMainWorld('quota', {
     markTiboRead: (items) => electron_1.ipcRenderer.invoke('quota:mark-tibo-read', items),
     clearTibo: () => electron_1.ipcRenderer.invoke('quota:clear-tibo'),
     translateTibo: (id) => electron_1.ipcRenderer.invoke('quota:translate-tibo', id),
+    prioritizeTibo: (id) => electron_1.ipcRenderer.invoke('quota:prioritize-tibo', id),
+    translateNotice: (id) => electron_1.ipcRenderer.invoke('quota:translate-notice', id),
     openTiboSource: (id) => electron_1.ipcRenderer.invoke('quota:open-tibo-source', id),
     subscribeTibo: (listener) => {
         const handler = (_event, state) => listener(state);

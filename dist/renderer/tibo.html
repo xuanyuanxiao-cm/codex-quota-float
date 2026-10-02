@@ -1,21 +1,12 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self' data:">
-<title>Tibo 动态</title><link rel="stylesheet" href="notices.css"><link rel="stylesheet" href="tibo.css"><script defer src="feed-nav.js"></script><script defer src="tibo.js"></script></head>
-<body data-feed-page="tibo"><main>
-<nav class="feed-nav" aria-label="消息分类"><button id="nav-notices" type="button">重置消息 <span id="nav-notices-count"></span></button><button id="nav-tibo" type="button" aria-current="page">Tibo 动态 <span id="nav-tibo-count"></span></button></nav>
-<header><div><h1>Tibo</h1><p class="muted">@thsottiaux · 最近 30 天</p></div><button id="refresh" type="button">立即更新</button></header>
-<div class="feed-status"><p id="sync" class="muted" role="status">正在读取本地动态…</p><p id="error" role="status" hidden></p><p id="translation-status" class="muted"></p></div>
-<div class="section-heading"><span class="muted">按发布时间倒序 · 默认中文</span><button id="read-all" type="button">全部标记已读</button></div>
-<div id="feed-list" aria-label="推文列表"></div>
-<p id="empty" class="muted" hidden>暂无收录内容。首次同步的历史动态默认已读。</p>
-<button id="more" type="button" hidden>加载更早推文</button>
-<p id="coverage" class="muted"></p>
-<footer><details><summary>来源、存储与设置</summary>
-<p id="source" class="muted"></p><p id="storage" class="muted"></p>
-<p class="muted">运行时每 30 分钟更新，手动更新最短间隔 1 分钟；失败后自动重试间隔延长至 1 小时。关闭到托盘后继续更新，完全退出后停止。</p>
-<p class="muted">推文及译文按发布时间保留 30 天，超期未读也会清理。媒体仅保留链接，不自动下载。重置消息独立长期保存。</p>
-<p class="muted">推文和中文翻译来自 FxTwitter 公共接口，无需申请 X API 或填写密钥。第三方来源可能暂时不可用，失败时保留已收录内容。翻译以原文为准。</p>
-<button id="clear" type="button">清空动态缓存</button><div id="clear-confirm" hidden><p>清空当前普通动态和译文？重置消息不受影响，已清空的旧动态不会再次提醒。</p><button id="clear-yes" type="button">确认清空</button> <button id="clear-no" type="button">取消</button></div>
-</details></footer>
-</main></body></html>
+<title>Tibo 动态</title><link rel="stylesheet" href="notices.css"><link rel="stylesheet" href="tibo.css"><link rel="stylesheet" href="reader.css"><script defer src="feed-nav.js"></script><script defer src="message-reader.js"></script><script defer src="tibo.js"></script></head>
+<body data-feed-page="tibo"><main class="reader-shell">
+<nav class="feed-nav" aria-label="消息分类"><button id="nav-notices">重置消息 <span id="nav-notices-count"></span></button><button id="nav-tibo" aria-current="page">Tibo 动态 <span id="nav-tibo-count"></span></button></nav>
+<header><div><h1>Tibo 动态</h1><p class="muted">@thsottiaux · 最近 30 天 · 默认中文</p></div><button id="refresh">立即更新</button></header><p id="sync" class="reader-sync" role="status">正在读取本地动态…</p><p id="error" role="status" hidden></p><button id="new-posts" class="reader-new" hidden></button>
+<div class="reader-grid"><aside class="reader-list" aria-label="动态列表"><div class="reader-filters"><button id="filter-all" aria-pressed="true">全部</button><button id="filter-unread" aria-pressed="false">未读</button></div><div id="feed-list"></div><p id="empty" class="muted" hidden></p><button id="more" hidden>加载更早推文</button><div class="history-controls"><button id="read-all">全部标记已读</button><p class="muted">动态与重置消息独立计数<br>仅保留最近 30 天</p></div></aside>
+<div class="reader-content"><button id="reader-back" class="reader-back">← 返回动态列表</button><article class="feed-post" id="post-detail" hidden><div class="post-meta"><span id="post-meta"></span><span id="post-read" class="post-unread"></span></div><h2 id="post-title"></h2><p id="post-body" class="post-body reader-body"></p><div class="post-translation"><span id="post-translation"></span> <button id="translate">翻译为中文</button></div>
+<details id="post-context" class="post-context" hidden><summary id="context-heading"></summary><p id="context-body"></p><p id="context-status" class="muted"></p><details id="context-original-wrap"><summary>查看上下文原文</summary><p id="context-original"></p></details></details><p id="context-missing" class="muted" hidden>上下文暂不可用</p><details id="post-original-wrap" hidden><summary>查看正文原文</summary><p id="post-original" class="post-original"></p></details><p id="post-media" class="muted" hidden></p><div class="post-actions reader-actions"><button id="mark-read">标记已读</button><button id="open-source">查看 X 原帖 ↗</button><button id="related" hidden>重置详情 →</button></div></article><p id="no-selection" class="muted">从列表选择一条动态。</p>
+<footer><details><summary>同步与翻译状态</summary><p id="translation-status" class="muted"></p><p id="coverage" class="muted"></p></details><details><summary>来源、存储与设置</summary><p id="source" class="muted"></p><p id="storage" class="muted"></p><p class="muted">运行时每 30 分钟更新动态，手动更新最短间隔 1 分钟。翻译独立限速处理，优先当前阅读内容；失败时保留原文，支持重试。关闭到托盘后继续更新，完全退出后停止。</p><p class="muted">推文及译文按发布时间保留 30 天，超期未读也会清理。媒体仅保留链接，不自动下载。重置消息独立长期保存。</p><button id="clear">清空动态缓存</button><div id="clear-confirm" hidden><p>清空当前动态和译文？重置消息不受影响，已清空的旧动态不会再次提醒。</p><button id="clear-yes">确认清空</button> <button id="clear-no">取消</button></div></details></footer>
+</div></div></main></body></html>

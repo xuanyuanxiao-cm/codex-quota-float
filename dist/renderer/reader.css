@@ -1,0 +1,45 @@
+main.reader-shell { max-width: 1120px; padding: 18px 22px; height: 100vh; display: flex; flex-direction: column; }
+.reader-shell > * { flex-shrink: 0; }
+.reader-grid { display: grid; grid-template-columns: minmax(210px, 30%) minmax(0, 1fr); gap: 24px; margin-top: 18px; flex: 1; min-height: 0; }
+.reader-list { min-width: 0; border-right: 1px solid #2d3c53; padding-right: 18px; overflow-y: auto; }
+.reader-content { min-width: 0; overflow-y: auto; padding: 0 6px 18px 0; }
+.reader-content > :first-child { margin-top: 0; }
+.reader-content .feed-post { border: 0; padding-top: 0; margin-top: 0; }
+#account-summary { border-left: 2px solid #36556d; padding-left: 12px; color: #a7bad4; }
+.reader-back { display: none; margin-bottom: 12px; }
+.reader-filters { display: flex; gap: 6px; margin-bottom: 12px; }
+.reader-filters button { flex: 1; background: transparent; }
+.reader-filters button[aria-pressed="true"] { background: #1c3048; color: #99dbef; border-color: #669cb4; }
+.reader-list #history, .reader-list #feed-list { display: flex; flex-direction: column; gap: 8px; padding-top: 0; border: 0; }
+.reader-list .history-item { white-space: normal; overflow-wrap: anywhere; padding: 12px; }
+.reader-list .history-item span, .reader-list .history-item small { display: block; }
+.reader-list .history-item span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.reader-list .history-item small { margin-top: 5px; font-size: 11px; }
+.reader-list .history-controls { display: grid; gap: 10px; }
+.reader-list .history-controls select { width: 100%; }
+.reader-sync { font-size: 12px; color: #a7bad4; padding: 10px 0; border-bottom: 1px solid #2d3c53; }
+.reader-new { width: 100%; margin-top: 12px; text-align: left; }
+#detail { border: 0; padding-top: 0; }
+#detail .reader-body, .reader-body { font-size: 16px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; margin: 15px 0; }
+#detail #summary { border-left: 2px solid #36556d; padding-left: 12px; color: #a7bad4; font-size: 12px; margin: 18px 0; }
+#detail #published, #detail #source { font-size: 12px; }
+#translation-wrap { border: 0; margin: 0; padding: 0; }
+.reader-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0; align-items: center; }
+.reader-status { color: #a7bad4; font-size: 12px; }
+.reader-content details:not(.post-context) { margin-top: 14px; }
+.reader-content .post-context { background: transparent; border-left: 2px solid #36556d; border-radius: 0; padding: 4px 0 4px 12px; }
+.reader-content .post-context summary { font-size: 12px; }
+.reader-content footer { margin-top: 20px; }
+.reader-content .forecast-card { background: transparent; border-top: 1px solid #2d3c53; border-radius: 0; padding: 12px 0; }
+.reader-content .forecast-line strong { font-size: 16px; }
+#history-fold { margin: 0; padding: 0; border: 0; }
+#empty-history { font-size: 12px; color: #a7bad4; }
+@media (max-width: 640px) {
+    main.reader-shell { padding: 16px; height: auto; display: block; }
+    .reader-grid { display: block; }
+    .reader-list { padding-right: 0; border-right: 0; overflow: visible; }
+    .reader-content { display: none; overflow: visible; }
+    body.reader-detail .reader-list { display: none; }
+    body.reader-detail .reader-content { display: block; }
+    .reader-back { display: inline-block; }
+}

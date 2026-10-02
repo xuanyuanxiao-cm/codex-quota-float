@@ -45,9 +45,10 @@ function saveTranslation(record, translation, text, now) {
     }
 }
 class ResetNotices {
-    constructor(file, { loadCommunity = fetchCommunity, scrapePage = scrape, canVerify = () => Boolean(process.env.FIRECRAWL_API_KEY), now = Date.now, onChange = () => {}, onNotice = () => {} } = {}) {
+    constructor(file, { loadCommunity = fetchCommunity, scrapePage = scrape, canVerify = () => Boolean(process.env.FIRECRAWL_API_KEY), translateOriginal, now = Date.now, onChange = () => {}, onNotice = () => {} } = {}) {
         this.file = file; this.loadCommunity = loadCommunity; this.scrapePage = scrapePage; this.canVerify = canVerify;
         this.now = now; this.onChange = onChange; this.onNotice = onNotice;
+        this.translateOriginal = translateOriginal;
         this.saved = { version: 3, enabled: true, showProbability: true, initialized: false, lastAttemptAt: null, lastSuccessAt: null, records: [], community: null, accountBaselines: {}, forecasts: [] };
         try {
             const old = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -108,6 +109,7 @@ class ResetNotices {
         const { accountBaselines, forecasts, ...publicState } = this.saved;
         return { ...publicState, forecastHistory: forecastSummary(this.saved), records: this.saved.records.filter(r => r.kind !== 'unrelated').map(r => ({ ...r })).sort((a, b) => Number(a.read !== false) - Number(b.read !== false) || messagePriority(a) - messagePriority(b) || b.publishedAt - a.publishedAt), loading: this.loading, error: this.error,
             nextCheckAt: this.saved.enabled ? this.nextCheckAt() : null, manualCheckAt: this.manualCheckAt(), verificationEnabled: this.canVerify(),
+            translationEnabled: Boolean(this.translateOriginal), translatingId: this.translatingId || null,
             forecast: c ? { asOf: c.asOf, percent: c.percent, healthy: c.healthy } : null, activeNotice,
             unread: this.saved.records.filter(r => r.verified && r.kind !== 'unrelated' && r.read === false).length, account: this.account, recoveries: this.recoveries, cardArrival: this.cardArrival };
     }
@@ -118,7 +120,36 @@ class ResetNotices {
         if (this.stopped || !this.saved.enabled) return;
         this.timer = setTimeout(() => { void this.refresh(); }, Math.max(0, this.nextCheckAt() - this.now())); this.timer.unref?.();
     }
-    stop() { this.stopped = true; clearTimeout(this.timer); this.abort?.abort(); }
+    stop() { this.stopped = true; clearTimeout(this.timer); this.abort?.abort(); this.translationAbort?.abort(); }
+    async translatePost(id) {
+        if (this.translationPending) return this.translationPending;
+        const record = this.saved.records.find(r => r.id === id);
+        if (!this.translateOriginal || !record?.verified || !record.originalText || !postUrl(record.url) || record.lastTranslationAttemptAt > this.now() - 60000) return this.view();
+        const original = record.originalText, revision = record.revision;
+        this.translationAbort = new AbortController(); this.translatingId = id;
+        record.lastTranslationAttemptAt = this.now(); this.emit();
+        this.translationPending = (async () => {
+            try {
+                const result = record.chineseText && record.translationOriginalText === original
+                    ? { originalText: original, chineseText: record.chineseText }
+                    : await this.translateOriginal(record, { signal: this.translationAbort.signal });
+                this.translationAbort.signal.throwIfAborted();
+                const current = this.saved.records.find(r => r.id === id && r.originalText === original && r.revision === revision);
+                if (current) {
+                    saveTranslation(current, result, original, this.now()); current.translationStatus = current.chineseText && current.translationOriginalText === original ? 'done' : 'unavailable';
+                    if (current.context?.originalText && !current.context.chineseText) {
+                        const contextText = current.context.originalText;
+                        const context = await this.translateOriginal(current.context, { signal: this.translationAbort.signal });
+                        this.translationAbort.signal.throwIfAborted();
+                        if (current.context?.originalText === contextText && context.originalText === contextText && typeof context.chineseText === 'string') current.context.chineseText = context.chineseText;
+                    }
+                }
+            } catch { if (!this.translationAbort.signal.aborted) record.translationStatus = 'unavailable'; }
+            finally { this.translatingId = null; this.translationPending = null; this.persist(); this.emit(); }
+            return this.view();
+        })();
+        return this.translationPending;
+    }
     setEnabled(enabled) {
         this.saved.enabled = enabled; this.persist();
         if (!enabled && !this.manual) this.abort?.abort();
@@ -167,12 +198,13 @@ class ResetNotices {
         const result = classifyPost(post.originalText);
         if (result.kind === 'unrelated') return;
         const existing = this.saved.records.find(r => r.id === post.id);
-        if (existing?.originalText === post.originalText && (!post.chineseText || existing.chineseText === post.chineseText)) return;
+        if (existing?.originalText === post.originalText && (!post.chineseText || existing.chineseText === post.chineseText) && JSON.stringify(existing.context || null) === JSON.stringify(post.context || null)) return;
         const before = structuredClone(this.saved.records);
         const changed = existing?.originalText && existing.originalText !== post.originalText;
         const firstOriginal = !existing?.originalText;
         const record = existing || { id: post.id, url: post.url, publishedAt: post.publishedAt, firstSeenAt: this.now(), revision: 1, read: !post.eligible, eligible: Boolean(post.eligible), source: 'tibo' };
         Object.assign(record, result, { text: post.originalText, originalText: post.originalText, verified: true, verificationStatus: 'verified', verifiedAt: this.now(), needsRecheck: false });
+        record.context = post.context ? structuredClone(post.context) : null;
         if (firstOriginal && !record.manualReadAt) record.read = !(post.eligible || record.eligible);
         if (changed) { record.revision++; record.read = false; record.chineseText = null; }
         if (post.chineseText) { record.chineseText = post.chineseText; record.translationOriginalText = post.originalText; }

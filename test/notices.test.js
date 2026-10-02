@@ -30,6 +30,19 @@ test('classifier separates announcements, completion, grants and unrelated expla
     assert.equal(classifyPost('We will reset your password if you request it.').kind, 'unrelated');
     for (const text of ['We will reset usage limits for Codex if the outage lasts.', 'We are not going to reset usage limits for Codex.', 'Will we reset usage limits for Codex?', 'We might send a banked reset to all paid users.']) assert.equal(classifyPost(text).kind, 'hint', text);
 });
+
+test('manual announcement translation uses the verified original and never acknowledges the notice', async t => {
+    const s = setup(t); await s.service.refresh();
+    const record = s.service.saved.records[0]; record.read = false;
+    s.service.translateOriginal = async r => ({ originalText: r.originalText, chineseText: '我们将为所有付费用户重置使用额度。' });
+    await s.service.translatePost(record.id);
+    assert.equal(record.translationStatus, 'done'); assert.equal(record.read, false);
+    assert.equal(record.translationOriginalText, record.originalText);
+    record.chineseText = null; s.advance(60000);
+    s.service.translateOriginal = async () => ({ originalText: 'Different post', chineseText: '错误的翻译' });
+    await s.service.translatePost(record.id);
+    assert.equal(record.translationStatus, 'unavailable'); assert.equal(record.chineseText, null); assert.equal(record.read, false);
+});
 test('first sync is silent; new posts notify once and reading does not change announcement state', async t => {
     const s = setup(t); await s.service.refresh(); assert.deepEqual(s.notified, []);
     s.advance(AUTO_INTERVAL); s.items([{ id: '12345678902', time: NOW + 1000 }]); await s.service.refresh();
