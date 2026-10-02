@@ -66,8 +66,8 @@ const mouseClick = (x, y) => {
   quotaWindow.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
   quotaWindow.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
 };
-// Native Windows bounds can round outward by one DIP at fractional display scaling.
-const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - height) <= 1;
+// Native Windows bounds can round outward by two DIPs at fractional display scaling.
+const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - height) <= 2;
 
 (async () => {
   await app.whenReady();
@@ -100,6 +100,7 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   assert.deepEqual(await evaluate(`['[data-window="five-hour"]', '[data-center="five-hour"]', '[data-detail-window="five-hour"]', '.center-divider'].map(s => getComputedStyle(document.querySelector(s)).display)`), ['none', 'none', 'none', 'none']);
   assert.equal(await evaluate(`document.querySelector('[data-center="weekly"]').textContent`), '73%');
   const weeklyHeight = Math.ceil(await evaluate(`document.querySelector('[data-quota-app]').getBoundingClientRect().height`));
+  assert.equal(layouts.at(-1).height, weeklyHeight, 'renderer reports the measured weekly-only content height');
   await waitFor(() => matchesHeight(weeklyHeight), 'weekly-only height');
   assert.ok(weeklyHeight < normalHeight, 'missing five-hour row leaves no empty space');
   const previewDir = path.join(__dirname, '..', 'release', 'plan-preview');
@@ -123,7 +124,8 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   const normalY = quotaWindow.getBounds().y;
   await evaluate(`document.querySelector('[data-action="reset"]').click()`);
   await waitFor(() => layouts.at(-1)?.mode === 'picker', 'picker layout');
-  assert.equal(quotaWindow.getBounds().height, 360);
+  assert.equal(layouts.at(-1).height, 360);
+  assert.ok(matchesHeight(360));
   assert.equal(hit(140, 340), true);
   assert.equal(hit(12, 12), false);
   await evaluate(`document.querySelector('[data-action="cancel-reset"]').click()`);

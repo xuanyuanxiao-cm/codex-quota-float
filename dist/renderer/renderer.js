@@ -137,6 +137,8 @@
     const noticeSummary = root.querySelector('[data-notice-summary]');
     const probabilityTag = root.querySelector('[data-probability-tag]');
     const probabilityPanel = root.querySelector('[data-probability-panel]');
+    const probabilitySummary = root.querySelector('[data-action="notice-detail"]');
+    const noticeSource = root.querySelector('[data-notice-source]');
     const alertSummary = root.querySelector('[data-alert-summary]');
     let latestNotices;
     if (!orb || !details || !refresh || !reset || !resetCount || !creditPicker || !creditList || !pickerSelection || !creditError || !cancelReset || !confirmReset || !edgeHandle || !fiveHourRing || !weeklyRing || !fiveHourCenter || !weeklyCenter || !fiveHourText || !weeklyText || !fiveHourCountdown || !fiveHourResetAt || !weeklyCountdown || !weeklyResetAt || !lastUpdated || !fallback || !note) {
@@ -483,7 +485,9 @@
     orbExpiring?.addEventListener('click', onReset);
     const onLabel = () => { void api.openNotices?.(window.noticePresentation(latestNotices || {}, now()).recordId); };
     probabilityTag?.addEventListener("click", onLabel);
-    probabilityPanel?.addEventListener("click", onNotices);
+    probabilitySummary?.addEventListener('click', onLabel);
+    const onNoticeSource = () => { if (!noticeSource.hidden && noticeSource.dataset.recordId) void api.openNoticeSource?.(noticeSource.dataset.recordId); };
+    noticeSource?.addEventListener('click', onNoticeSource);
     const renderNotices = (state) => {
       latestNotices = state;
       updateNoticeSummary(state);
@@ -504,8 +508,12 @@
       const probabilityValue = root.querySelector('[data-probability-value]');
       const probabilityNote = root.querySelector('[data-probability-note]');
       const probabilityHeading = root.querySelector('[data-probability-heading]');
-      if (probabilityHeading) probabilityHeading.textContent = presentation.heading;
-      if (probabilityValue) probabilityValue.textContent = presentation.value;
+      const record = state.records?.find(r => r.id === presentation.recordId);
+      const hasSource = Boolean(record && record.kind !== 'arrival' && record.url);
+      probabilityPanel?.classList.toggle('has-source', hasSource);
+      if (noticeSource) { noticeSource.hidden = !hasSource; noticeSource.dataset.recordId = hasSource ? record.id : ''; }
+      if (probabilityHeading) probabilityHeading.textContent = hasSource && record.verified ? `Tibo · ${presentation.tag}` : presentation.heading;
+      if (probabilityValue) { probabilityValue.textContent = presentation.value; probabilityValue.hidden = hasSource; }
       if (probabilityNote) probabilityNote.textContent = presentation.note;
       syncWindowLayout();
     };
@@ -546,7 +554,8 @@
       orbRecovered?.removeEventListener('click', openQuotaDetails);
       orbExpiring?.removeEventListener('click', onReset);
       probabilityTag?.removeEventListener("click", onLabel);
-      probabilityPanel?.removeEventListener("click", onNotices);
+      probabilitySummary?.removeEventListener('click', onLabel);
+      noticeSource?.removeEventListener('click', onNoticeSource);
       window.clearInterval?.(clockTimer);
       clearTimeout(summaryTimer);
       resizeObserver.disconnect();

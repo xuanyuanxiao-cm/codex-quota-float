@@ -1,6 +1,6 @@
 {
   "name": "codex-quota-float-companion",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "description": "Windows 上的 Codex 额度悬浮球：查看剩余额度、用量趋势、重置卡提醒与重置动态",
   "private": true,
   "main": "dist/main.js",

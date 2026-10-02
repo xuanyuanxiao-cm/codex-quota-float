@@ -43,7 +43,7 @@ function noticePresentation(state, now = Date.now()) {
             : mismatch ? '社区与原帖记录的阶段不同，请分别查看下方依据。'
             : active.verified ? completed ? `原帖与社区记录均指向${event}已完成，本账户是否生效仍需单独确认。` : `原帖说的是“将${event}”，目前不能据此认定已经${banked ? '发放' : '执行'}。`
             : `这是社区收录的${completed ? '完成记录' : '预告'}，本应用尚未通过原帖确认这一进展。`;
-        return { value, detailTitle: active.verified ? completed ? `Tibo 表示已${event}` : `Tibo 预告将${event}` : completed ? `社区报告已${event}` : `社区收录${event}预告`,
+        return { recordId: record?.id, value, detailTitle: active.verified ? completed ? `Tibo 表示已${event}` : `Tibo 预告将${event}` : completed ? `社区报告已${event}` : `社区收录${event}预告`,
             tag: active.verified ? banked ? '发卡已公告' : '重置已公告' : completed ? banked ? '社区记录发卡' : '社区记录重置' : '社区收录预告',
             heading: active.verified ? 'Tibo 原帖 · 已核验' : '社区消息 · 进展待核实',
             note: `${active.verified ? '原帖已核验' : '社区记录 · 进展待核实'} · ${banked ? '需要手动用卡' : '账户生效情况待确认'}`,

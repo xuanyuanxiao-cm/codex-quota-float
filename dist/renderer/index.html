@@ -68,10 +68,13 @@
         </section>
         <p class="status-note" data-note hidden></p>
         <p class="last-updated" data-last-updated hidden></p>
-        <button class="probability-panel" data-probability-panel><span><span data-probability-heading>社区预测 · 未来 24h</span><strong data-probability-value>—</strong></span><small data-probability-note>等待社区数据</small></button>
-        <button class="trends-button" data-action="trends">▥ 用量趋势 ↗</button>
+        <section class="probability-panel" data-probability-panel>
+          <button class="probability-summary" data-action="notice-detail"><span><span data-probability-heading>社区预测 · 未来 24h</span><strong data-probability-value>—</strong></span><small data-probability-note>等待社区数据</small></button>
+          <button class="notice-source" data-notice-source type="button" title="在浏览器打开对应 X 原帖" hidden>原文 ↗</button>
+        </section>
         <button class="notice-button" data-action="notices"><span>≡ 重置动态</span><span data-notice-summary>读取中…</span></button>
         <button class="tibo-button" data-action="tibo"><span>Tibo 动态 <b data-tibo-badge hidden></b></span><small data-tibo-summary>最近 30 天 · 中文阅读</small></button>
+        <button class="trends-button" data-action="trends">▥ 用量趋势 ↗</button>
       </section>
 
       <button class="edge-handle" type="button" data-action="restore-from-edge" aria-label="显示悬浮球">
