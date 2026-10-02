@@ -3,19 +3,58 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { ResetNotices, classifyPost, originalPost, HOUR, DAY, AUTO_INTERVAL } = require('../dist/notices');
+const { ResetNotices, classifyPost, HOUR, DAY, AUTO_INTERVAL } = require('../dist/notices');
 const { INTERVAL } = require('../dist/community-reset');
 const { noticePresentation } = require('../dist/renderer/notice-presentation');
 const { url, postText, original, snapshot } = require('./notice-fixtures.cjs');
 const NOW = Date.parse('2026-09-26T06:00:00Z');
+test('feature pause blocks requests, imports and account records; resumed history is silent', async t => {
+    const s = setup(t); await s.service.refresh();
+    s.advance(HOUR); s.items([{ id: '12345678902', time: s.now() - 1000 }]); await s.service.refresh();
+    assert.equal(s.service.view().unread, 1);
+    s.advance(HOUR); let release;
+    const load = s.service.loadCommunity;
+    s.service.loadCommunity = () => new Promise(resolve => { release = resolve; });
+    const pending = s.service.refresh(); s.service.setFeatureEnabled(false);
+    const paused = fs.readFileSync(s.service.file, 'utf8');
+    release(snapshot(s.now(), [{ id: '12345678903', time: s.now() - 1000 }])); await pending;
+    s.service.loadCommunity = load;
+    const calls = s.calls.length;
+    await s.service.refresh(true); await s.service.translatePost('12345678902');
+    s.service.importTiboPost({ ...original('12345678903'), publishedAt: s.now(), eligible: true });
+    s.service.updateAccount({ status: 'ready', accountKey: 'paused-account', resetCredits: { credits: [{ id: 'paused-card', status: 'available' }] } });
+    assert.equal(s.calls.length, calls); assert.equal(fs.readFileSync(s.service.file, 'utf8'), paused);
+    s.advance(HOUR); s.items([{ id: '12345678903', time: s.now() - 1000 }]);
+    const restarted = new ResetNotices(s.service.file, s.options); t.after(() => restarted.stop());
+    restarted.setFeatureEnabled(true); await restarted.refresh(true);
+    assert.equal(restarted.view().records.find(r => r.id === '12345678903').read, true);
+    assert.equal(restarted.view().records.find(r => r.id === '12345678902').read, false);
+    s.advance(HOUR); s.items([{ id: '12345678904', time: s.now() - 1000 }]); await restarted.refresh();
+    assert.equal(restarted.view().unread, 2);
+});
+test('pausing during original retrieval cannot append a late forecast', async t => {
+    const s = setup(t); await s.service.refresh(); s.advance(HOUR);
+    s.items([{ id: '12345678902', time: s.now() - 1000 }]);
+    let release;
+    s.service.loadOriginal = () => new Promise(resolve => { release = resolve; });
+    const pending = s.service.refresh();
+    await new Promise(resolve => setImmediate(resolve));
+    s.service.setFeatureEnabled(false);
+    const paused = fs.readFileSync(s.service.file, 'utf8');
+    const forecasts = structuredClone(s.service.saved.forecasts);
+    release(original('12345678902')); await pending;
+    assert.equal(fs.readFileSync(s.service.file, 'utf8'), paused);
+    assert.deepEqual(s.service.saved.forecasts, forecasts);
+    assert.equal(s.service.view().unread, 0);
+});
 function setup(t) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reset-notices-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     let now = NOW, items = [{ id: '12345678901', time: NOW - HOUR }], fail = false;
     const notified = [], calls = [];
-    const options = { now: () => now, canVerify: () => true, onNotice: r => notified.push(r.id),
+    const options = { now: () => now, onNotice: r => notified.push(r.id),
         loadCommunity: async () => { calls.push('community'); if (fail) throw Error('offline'); return snapshot(now, items); },
-        scrapePage: async address => { calls.push(address); return original(address.split('/').at(-1)); } };
+        loadOriginal: async record => { calls.push(record.url); return original(record.id); } };
     const service = new ResetNotices(path.join(dir, 'notices.json'), options);
     t.after(() => service.stop());
     return { service, options, notified, calls, advance: time => { now += time; }, items: value => { items = value; }, fail: value => { fail = value; }, now: () => now };
@@ -60,15 +99,15 @@ test('only the selected announcement is marked read', async t => {
     s.service.markRead('12345678902'); assert.equal(s.service.view().unread, 1);
     s.service.markRead(); assert.equal(s.service.view().unread, 1);
 });
-test('missing verification key does not block community data or claim local verification', async t => {
-    const s = setup(t); s.service.canVerify = () => false; await s.service.refresh();
+test('unavailable original content does not block community data or claim retrieval', async t => {
+    const s = setup(t); s.service.loadOriginal = async () => ({ originalText: '' }); await s.service.refresh();
     assert.equal(s.service.view().forecast.percent, 35);
     assert.equal(s.service.view().activeNotice.verified, false);
     assert.equal(s.calls.length, 1); assert.equal(s.service.view().unread, 0);
     assert.match(noticePresentation(s.service.view(), s.now()).note, /进展待核实/);
 });
 test('an original contradicting the community classification never becomes an announcement', async t => {
-    const s = setup(t); s.service.scrapePage = async address => original(address.split('/').at(-1), 'Banked resets expire after 30 days.');
+    const s = setup(t); s.service.loadOriginal = async record => original(record.id, 'Banked resets expire after 30 days.');
     await s.service.refresh(); assert.equal(s.service.view().activeNotice, null);
     assert.equal(s.service.view().records[0].verificationStatus, 'verified');
     assert.equal(s.service.view().records[0].kind, 'limits');
@@ -76,17 +115,16 @@ test('an original contradicting the community classification never becomes an an
 });
 test('temporary verification failures retry after backoff without exhausting content attempts', async t => {
     const s = setup(t); let fail = true, attempts = 0;
-    s.service.scrapePage = async address => { attempts++; if (fail) throw Error('network'); return original(address.split('/').at(-1)); };
+    s.service.loadOriginal = async record => { attempts++; if (fail) throw Error('network'); return original(record.id); };
     for (let i = 0; i < 4; i++) { await s.service.refresh(); s.advance(6 * HOUR); }
     assert.equal(attempts, 4); assert.equal(s.service.view().records[0].verificationAttempts, undefined);
     fail = false; await s.service.refresh(); assert.equal(s.service.view().records[0].verified, true);
 });
-test('unrecognizable original pages use bounded attempts and exclude replies', async t => {
-    const s = setup(t); let calls = 0; s.service.scrapePage = async () => { calls++; return '<h1>Login</h1>'; };
+test('unavailable original content uses backoff without creating an announcement', async t => {
+    const s = setup(t); let calls = 0; s.service.loadOriginal = async () => { calls++; return { originalText: '' }; };
     for (let i = 0; i < 5; i++) { await s.service.refresh(); s.advance(6 * HOUR); }
     assert.equal(calls, 3); assert.equal(s.service.view().records[0].verified, false);
-    assert.equal(originalPost(`<p>${url('12345678901')}</p><h2>Post</h2><p>Hi</p><h2>Thread</h2>${original('12345678901')}`, url('12345678901')), null);
-    assert.equal(originalPost(original('123456789012'), url('12345678901')), null);
+    assert.equal(s.service.view().records[0].verificationStatus, 'unreadable');
 });
 test('manual checks, restart and concurrent calls respect the ten-minute interval', async t => {
     const s = setup(t); await Promise.all([s.service.refresh(), s.service.refresh(true)]);
@@ -144,7 +182,7 @@ test('network failure retains records but suppresses the forecast and backs off'
     assert.equal(noticePresentation(s.service.view(), s.now()).value, '—');
 });
 test('a locally verified limit adjustment overrides an incorrect community reset classification', async t => {
-    const s = setup(t); s.service.scrapePage = async address => original(address.split('/').at(-1), 'We increased usage limits for Codex.');
+    const s = setup(t); s.service.loadOriginal = async record => original(record.id, 'We increased usage limits for Codex.');
     await s.service.refresh(); assert.equal(s.service.view().records[0].kind, 'limits');
     assert.equal(s.service.view().activeNotice, null);
     assert.equal(noticePresentation(s.service.view(), s.now()).value, '35%');
@@ -175,7 +213,7 @@ test('card arrival uses new IDs, never first reads, missing readings or stale re
 test('Chinese translation is cached against the exact original and survives restart', async t => {
     const s = setup(t); let requests = 0;
     const chineseText = '我们将为所有付费用户重置 Codex 的使用额度。';
-    s.service.scrapePage = async address => { requests++; return { html: original(address.split('/').at(-1)), translation: { originalText: postText, chineseText } }; };
+    s.service.loadOriginal = async record => { requests++; return { ...original(record.id), chineseText }; };
     await s.service.refresh();
     assert.equal(s.service.view().records[0].chineseText, chineseText);
     assert.equal(s.service.view().records[0].stage, 'announced');
@@ -187,14 +225,17 @@ test('Chinese translation is cached against the exact original and survives rest
 
 test('mismatched translation is withheld; backfill preserves read and verification state', async t => {
     const s = setup(t);
-    s.service.scrapePage = async address => ({ html: original(address.split('/').at(-1)), translation: { originalText: 'A different reply', chineseText: '已经完成重置。' } });
     await s.service.refresh();
     assert.equal(s.service.view().records[0].chineseText, undefined);
     assert.equal(s.service.view().records[0].verified, true);
     s.service.saved.records[0].read = false;
     const verifiedAt = s.service.view().records[0].verifiedAt;
     s.advance(6 * HOUR);
-    s.service.scrapePage = async address => ({ html: original(address.split('/').at(-1)), translation: { originalText: postText, chineseText: '我们将重置所有付费用户的 Codex 使用额度。' } });
+    s.service.loadOriginal = async () => ({ originalText: 'A different reply', chineseText: '已经完成重置。' });
+    await s.service.refresh();
+    assert.equal(s.service.view().records[0].chineseText, undefined);
+    s.advance(6 * HOUR);
+    s.service.loadOriginal = async record => ({ ...original(record.id), chineseText: '我们将重置所有付费用户的 Codex 使用额度。' });
     await s.service.refresh();
     assert.ok(s.service.view().records[0].chineseText);
     assert.equal(s.service.view().records[0].read, false);
@@ -205,7 +246,7 @@ test('mismatched translation is withheld; backfill preserves read and verificati
 test('translation failures are bounded and leave verified originals usable', async t => {
     const s = setup(t); await s.service.refresh();
     let attempts = 0;
-    s.service.scrapePage = async () => { attempts++; throw Error('offline'); };
+    s.service.loadOriginal = async () => { attempts++; throw Error('offline'); };
     for (let i = 0; i < 4; i++) { s.advance(6 * HOUR); await s.service.refresh(); }
     const record = s.service.view().records[0];
     assert.equal(attempts, 2);
@@ -216,11 +257,11 @@ test('translation failures are bounded and leave verified originals usable', asy
 
 test('a changed community summary does not erase a verified original or its translation', async t => {
     const s = setup(t);
-    s.service.scrapePage = async address => ({ html: original(address.split('/').at(-1)), translation: { originalText: postText, chineseText: '我们将重置额度。' } });
+    s.service.loadOriginal = async record => ({ ...original(record.id), chineseText: '我们将重置额度。' });
     await s.service.refresh(); assert.ok(s.service.view().records[0].chineseText);
     s.advance(AUTO_INTERVAL);
     s.items([{ id: '12345678901', time: NOW - HOUR, text: 'Edited post' }]);
-    s.service.canVerify = () => false; await s.service.refresh();
+    s.service.loadOriginal = null; await s.service.refresh();
     assert.equal(s.service.view().records[0].chineseText, '我们将重置额度。');
     assert.equal(s.service.view().records[0].originalText, postText);
 });

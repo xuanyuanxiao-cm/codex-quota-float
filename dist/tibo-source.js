@@ -29,7 +29,7 @@ function createTiboSource({ fetchImpl = fetch } = {}) {
     async function request(path, signal) {
         const timeout = AbortSignal.timeout(30000);
         const response = await fetchImpl(`https://api.fxtwitter.com/2/${path}`, {
-            headers: { 'User-Agent': 'CodexQuotaFloat/0.1.21 (personal timeline reader)', Accept: 'application/json' },
+            headers: { 'User-Agent': 'CodexQuotaFloat/0.2.1 (personal timeline reader)', Accept: 'application/json' },
             signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
         if (response.status === 204) return { code: 200, results: [], cursor: {} };
@@ -54,8 +54,9 @@ function createTiboSource({ fetchImpl = fetch } = {}) {
         const url = canonicalUrl(record.url);
         if (!url) throw new Error('原帖地址无效');
         const id = url.split('/').at(-1);
+        if (record.id && record.id !== id) throw new Error('原帖身份未匹配，稍后重试');
         const data = await request(`status/${id}?lang=zh-CN`, signal);
-        if (data.status?.id !== id || canonicalUrl(data.status?.url) !== url || typeof data.status?.text !== 'string') throw new Error('原帖身份未匹配，稍后重试');
+        if (data.status?.id !== id || canonicalUrl(data.status?.url) !== url || data.status?.author?.screen_name?.toLowerCase() !== url.split('/')[3].toLowerCase() || typeof data.status?.text !== 'string' || data.status.text.length > 50000) throw new Error('原帖身份未匹配，稍后重试');
         return { originalText: data.status.text, chineseText: chinese(data.status) };
     }
     return { source: 'fxtwitter', configured: () => true, canTranslate: () => true, loadPage, hydrate };

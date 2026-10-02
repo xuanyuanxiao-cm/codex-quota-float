@@ -32,11 +32,11 @@ const windows = [], notifications = [], handlers = new Map(), opened = [];
 let shape;
 startCompanion({ ...electron,
     tiboOptions: require('./tibo-fixtures.cjs').offlineTibo,
-    noticeOptions: { now: () => now, canVerify: () => true, loadCommunity: async () => {
+    noticeOptions: { now: () => now, loadCommunity: async () => {
         if (communityFail) throw new Error('offline');
         const data = snapshot(Math.min(now, Date.now()), items);
         data.dataHealth.stale = communityStale; return data;
-    }, scrapePage: async address => ({ html: original(address.split('/').at(-1)), translation: { originalText: "We'll reset usage limits for all paid users across Codex.", chineseText: '我们将为所有付费用户重置 Codex 的使用额度。' } }) },
+    }, loadOriginal: async record => ({ ...original(record.id), chineseText: '我们将为所有付费用户重置 Codex 的使用额度。' }) },
     BrowserWindow: class extends BrowserWindow {
         constructor(options) { super({ ...options, show: false }); windows.push(this); }
         setShape(value) { shape = value; super.setShape(value); }
@@ -93,6 +93,14 @@ async function capture(win, name) {
     assert.equal(windows.length, 1, 'opening the original must not also open the reader');
     assert.equal(handlers.get('quota:read-notices')().unread, 1, 'opening an original does not acknowledge a reset announcement');
     const panelState = handlers.get('quota:read-notices')();
+    for (const kind of ['reset', 'banked']) for (const stage of ['completed', 'in-progress']) {
+        const tag = `原帖称${stage === 'completed' ? '已' : ''}${kind === 'reset' ? '重置' : '发卡'}${stage === 'in-progress' ? '中' : ''}`;
+        windows[0].webContents.send('quota:notices', { ...panelState, activeNotice: null,
+            records: [{ id: 'read-original', kind, stage, verified: true, publishedAt: Date.now() }] });
+        await until(() => evaluate(windows[0], `document.querySelector('[data-probability-tag]').textContent === ${JSON.stringify(tag)}`));
+        assert.equal(await evaluate(windows[0], `(() => { const el = document.querySelector('[data-probability-tag]'); return el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight; })()`), true, 'source-qualified labels fit the orb without a verification setting');
+        assert.match(await evaluate(windows[0], 'document.querySelector("[data-probability-tag]").title'), /已读取/);
+    }
     windows[0].webContents.send('quota:notices', { ...panelState, records: [], activeNotice: null });
     await until(() => evaluate(windows[0], 'document.querySelector("[data-notice-source]").hidden'));
     windows[0].webContents.send('quota:notices', { ...panelState, records: [{ id: 'arrival-test', kind: 'arrival', verified: true, stage: 'completed', count: 1, publishedAt: Date.now() }] });
@@ -111,7 +119,13 @@ async function capture(win, name) {
     await evaluate(windows[0], 'document.querySelector("[data-action=notice-detail]").click()');
     await until(() => windows.length === 2 && !windows[1].webContents.isLoading());
     await until(() => evaluate(windows[1], 'document.getElementById("status").textContent.includes("已预告")'));
+    assert.equal(await evaluate(windows[1], 'document.getElementById("status").textContent'), '已预告 · 原帖已读取');
     assert.equal(handlers.get('quota:read-notices')().unread, 1, 'opening announcements does not mark them read');
+    assert.equal(await evaluate(windows[1], 'document.querySelector(".reader-filters").firstElementChild.id'), 'filter-unread');
+    assert.equal(await evaluate(windows[1], 'document.querySelector("#coverage, #prediction-history")'), null, 'archive and forecast journal explanations are not shown');
+    assert.equal(await evaluate(windows[1], 'document.getElementById("filter-unread").getAttribute("aria-pressed")'), 'true');
+    assert.equal(await evaluate(windows[1], 'document.querySelectorAll("#history .history-item").length'), 1, 'the default view excludes read history');
+    await evaluate(windows[1], 'document.getElementById("filter-all").click()');
     assert.equal(await evaluate(windows[1], 'document.querySelector(".history-item[aria-pressed=true]").dataset.id'), '12345678902', 'panel summary opens the displayed announcement');
     assert.equal(await evaluate(windows[1], 'document.getElementById("quote-zh").textContent'), '我们将为所有付费用户重置 Codex 的使用额度。');
     assert.equal(await evaluate(windows[1], 'document.getElementById("translation-wrap").hidden'), false);

@@ -1,0 +1,27 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { PanelSettings } = require('../dist/panel-settings');
+test('display preferences default on, persist independently and survive restart', t => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-panel-settings-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const file = path.join(dir, 'settings.json'), settings = new PanelSettings(file);
+    assert.deepEqual(settings.value, { notices: true, tibo: true, trends: true });
+    settings.set('tibo', false); settings.set('notices', false);
+    assert.deepEqual(new PanelSettings(file).value, { notices: false, tibo: false, trends: true });
+    settings.set('tibo', true);
+    assert.equal(new PanelSettings(file).value.tibo, true);
+    assert.throws(() => settings.set('unknown', false)); assert.throws(() => settings.set('notices', 'false'));
+    assert.equal(settings.value.notices, false);
+    fs.writeFileSync(file, JSON.stringify({ tibo: false, forecast: 'false' }));
+    assert.deepEqual(new PanelSettings(file).value, { notices: true, tibo: false, trends: true });
+    fs.writeFileSync(file, JSON.stringify({ forecast: true, notices: false, tibo: false, trends: true }));
+    assert.equal(new PanelSettings(file).value.notices, true, 'legacy switches merge when either reset feature was on');
+    fs.writeFileSync(file, JSON.stringify({ forecast: false, notices: false }));
+    assert.equal(new PanelSettings(file).value.notices, false);
+    const broken = new PanelSettings(path.join(dir, 'missing', 'settings.json'));
+    assert.throws(() => broken.set('tibo', false));
+    assert.equal(broken.value.tibo, true, 'failed writes do not apply unsaved choices');
+});

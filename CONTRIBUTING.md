@@ -22,4 +22,4 @@
 4. 运行 pnpm test 及本次修改涉及的 Electron 界面测试，命令见 [README](README.md#开发与测试)。
 5. 提交 Pull Request，写清问题、修改后的行为和验证结果。
 
-不要提交真实凭据、用户额度历史、个人日志、node_modules/ 或构建安装包。原帖核验使用的 FIRECRAWL_API_KEY 只从运行环境读取。
+不要提交真实凭据、用户额度历史、个人日志、node_modules/ 或构建安装包。消息原文与翻译使用 FxTwitter 公共接口，无需配置 Firecrawl 密钥。

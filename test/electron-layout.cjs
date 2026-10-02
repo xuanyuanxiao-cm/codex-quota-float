@@ -153,6 +153,30 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   const { width, height } = image.getSize();
   assert.equal(bitmap[(Math.floor(height / 2) * width + 2) * 4 + 3], 0, 'orb padding must be fully transparent');
   assert.ok(bitmap[(Math.floor(height / 2) * width + Math.floor(width / 2)) * 4 + 3] > 0, 'the orb itself must still be rendered');
+  const connectedBounds = quotaWindow.getBounds();
+  const staleState = {
+    status: 'stale', planType: 'plus', hasFiveHour: true,
+    fiveHour: { remainingPercent: 60, resetsAt: 1800000000 },
+    weekly: { remainingPercent: 40, resetsAt: 1800000000 }, resetCredits: null,
+    lastUpdatedAt: Date.now() - 5 * 60000, errorMessage: '额度服务暂时无法连接',
+  };
+  quotaWindow.webContents.send('quota:state', staleState);
+  await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb')).filter`), 'grayscale(1)');
+  assert.deepEqual(await evaluate(`['five-hour', 'weekly'].map(key => document.querySelector('[data-center="' + key + '"]').textContent)`), ['60%', '40%']);
+  assert.match(await evaluate(`document.querySelector('.orb').title`), /连接失败.*距上次成功更新：5 分钟/);
+  assert.deepEqual(quotaWindow.getBounds(), connectedBounds, 'offline styling does not change the native window or hit regions');
+  assert.equal(hit(50, 50), true); assert.equal(hit(12, 12), false);
+  fs.writeFileSync(path.join(previewDir, 'orb-offline.png'), (await quotaWindow.webContents.capturePage()).toPNG());
+  quotaWindow.webContents.send('quota:state', { ...staleState, status: 'loading' });
+  await evaluate(`new Promise(resolve => requestAnimationFrame(resolve))`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb')).filter`), 'grayscale(1)');
+  assert.match(await evaluate(`document.querySelector('.orb').title`), /正在重连/);
+  quotaWindow.webContents.send('quota:state', { ...staleState, status: 'ready', lastUpdatedAt: Date.now(), errorMessage: null });
+  await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb')).filter`), 'none');
+  assert.equal(await evaluate(`document.querySelector('.orb').title`), '点击查看额度详情');
+  fs.writeFileSync(path.join(previewDir, 'orb-connected.png'), (await quotaWindow.webContents.capturePage()).toPNG());
   console.log(JSON.stringify({ electronLayout: 'passed', scaleFactor: electron.screen.getPrimaryDisplay().scaleFactor, normalHeight, pickerHeight: 360, cardConsumption: 0 }));
   if (!process.argv.includes('--interactive')) {
     app.quit();

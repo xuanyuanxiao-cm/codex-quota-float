@@ -19,7 +19,8 @@ const window_position_1 = require("./window-position");
 const { QuotaAlerts } = require('./alerts');
 const { UsageHistory } = require('./history');
 const { CodexAutoStart } = require('./auto-start');
-const { ResetNotices, postUrl, scrape } = require('./notices');
+const { PanelSettings } = require('./panel-settings');
+const { ResetNotices, postUrl } = require('./notices');
 const { fetchCommunity } = require('./community-reset');
 const { TiboFeed } = require('./tibo-feed');
 const { createTiboSource, canonicalUrl } = require('./tibo-source');
@@ -145,6 +146,7 @@ function startCompanion(deps = loadElectronDeps()) {
     let alerts;
     let history;
     let trendsWindow;
+    let settingsWindow, panelSettings;
     let notices;
     let noticesWindow;
     let noticesPage = 'notices', selectedMessage;
@@ -177,7 +179,7 @@ function startCompanion(deps = loadElectronDeps()) {
     controller.subscribe((state) => {
         refreshing = state.status === 'loading';
         const result = alerts?.update(state);
-        const historyChanged = history?.record(state);
+        const historyChanged = panelSettings?.value.trends !== false && history?.record(state);
         const windowsChanged = state.hasFiveHour !== latestState?.hasFiveHour;
         latestState = result ? { ...state, alerts: result.alerts } : state;
         if (historyChanged || windowsChanged) sendToWindow(trendsWindow, 'quota:history-updated');
@@ -187,8 +189,33 @@ function startCompanion(deps = loadElectronDeps()) {
     const requestReset = registerQuotaActions(deps.ipcMain, controller, deps.dialog, () => window);
     deps.app.on('before-quit', stopResources);
     void deps.app.whenReady().then(async () => {
+        panelSettings = new PanelSettings(node_path_1.default.join(deps.app.getPath('userData'), 'codex-panel-settings.json'));
+        deps.ipcMain.handle('quota:read-panel-settings', () => panelSettings.value);
+        const setPanelItem = (key, enabled) => {
+            panelSettings.set(key, enabled);
+            if (key === 'trends') { history.gapNext = true; if (!enabled) trendsWindow?.close(); }
+            if (key === 'notices') notices.setFeatureEnabled(enabled);
+            if (key === 'tibo') tibo.setFeatureEnabled(enabled);
+            if (!enabled && noticesWindow && (key === 'tibo' ? noticesPage === 'tibo' : key === 'notices' && noticesPage === 'notices')) noticesWindow.close();
+            sendToWindow(window, 'quota:panel-settings', panelSettings.value);
+            sendToWindow(settingsWindow, 'quota:panel-settings', panelSettings.value);
+            updateTrayMenu();
+            return panelSettings.value;
+        };
+        deps.ipcMain.handle('quota:set-panel-item', (_event, key, enabled) => setPanelItem(key, enabled));
+        const showSettings = () => {
+            if (settingsWindow && !settingsWindow.isDestroyed()) { if (settingsWindow.isMinimized()) settingsWindow.restore(); settingsWindow.show(); settingsWindow.focus(); return; }
+            settingsWindow = new deps.BrowserWindow({ width: 380, height: 340, resizable: false, maximizable: false,
+                title: '功能设置', backgroundColor: '#101b30', autoHideMenuBar: true,
+                icon: node_path_1.default.join(__dirname, '..', 'assets', 'codex-quota-float.ico'),
+                webPreferences: { preload: node_path_1.default.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
+            settingsWindow.on('closed', () => { settingsWindow = undefined; });
+            void settingsWindow.loadFile(node_path_1.default.join(__dirname, 'renderer', 'feature-settings.html'));
+        };
+        deps.ipcMain.handle('quota:close-settings', () => settingsWindow?.close());
         history = new UsageHistory(node_path_1.default.join(deps.app.getPath('userData'), 'codex-quota-history.json'));
         const showTrends = () => {
+            if (!panelSettings.value.trends) return;
             if (trendsWindow && !trendsWindow.isDestroyed()) {
                 if (trendsWindow.isMinimized()) trendsWindow.restore();
                 trendsWindow.show(); trendsWindow.focus(); return;
@@ -216,8 +243,9 @@ function startCompanion(deps = loadElectronDeps()) {
             sendToWindow(window, 'quota:state', latestState);
         });
         const showNotices = (_event, id, page = 'notices') => {
+            if (!panelSettings.value[page === 'tibo' ? 'tibo' : 'notices']) return;
             selectedMessage = id;
-            const select = () => { if (typeof selectedMessage === 'string') sendToWindow(noticesWindow, noticesPage === 'tibo' ? 'quota:select-tibo' : 'quota:select-notice', selectedMessage); };
+            const select = () => { if (typeof selectedMessage === 'string' || noticesPage === 'tibo') sendToWindow(noticesWindow, noticesPage === 'tibo' ? 'quota:select-tibo' : 'quota:select-notice', selectedMessage ?? null); };
             if (noticesWindow && !noticesWindow.isDestroyed()) {
                 if (noticesWindow.isMinimized()) noticesWindow.restore();
                 noticesWindow.show(); noticesWindow.focus();
@@ -242,7 +270,10 @@ function startCompanion(deps = loadElectronDeps()) {
         };
         notices = new ResetNotices(node_path_1.default.join(deps.app.getPath('userData'), 'codex-reset-notices.json'), {
             loadCommunity: options => fetchCommunity({ ...options, fetchImpl: deps.net?.fetch.bind(deps.net) || fetch }),
-            scrapePage: (url, options) => scrape(url, { ...options, fetchImpl: deps.net?.fetch.bind(deps.net) || fetch }),
+            loadOriginal: (record, options) => {
+                const cached = tibo.saved.records.find(r => r.id === record.id && r.url === record.url && r.originalText);
+                return cached && (!record.originalText || cached.chineseText) ? Promise.resolve(cached) : tibo.source.hydrate(record, options);
+            },
             translateOriginal: (record, options) => tibo.source.hydrate(record, options),
             ...deps.noticeOptions,
             onChange: (state) => {
@@ -250,13 +281,15 @@ function startCompanion(deps = loadElectronDeps()) {
                 sendToWindow(noticesWindow, 'quota:notices', state);
             },
         });
-        if (deps.app.isPackaged) notices.importArchive(require('./reset-history-seed.json'));
+        notices.setFeatureEnabled(panelSettings.value.notices);
+        if (deps.app.isPackaged && panelSettings.value.notices) notices.importArchive(require('./reset-history-seed.json'));
         tibo = new TiboFeed(node_path_1.default.join(deps.app.getPath('userData'), 'codex-tibo-feed.json'), {
             source: createTiboSource({ fetchImpl: deps.net?.fetch.bind(deps.net) }),
             ...deps.tiboOptions,
             onRelated: record => notices.importTiboPost(record),
             onChange: state => { sendToWindow(window, 'quota:tibo', state); sendToWindow(noticesWindow, 'quota:tibo', state); },
         });
+        tibo.setFeatureEnabled(panelSettings.value.tibo);
         deps.ipcMain.handle('quota:open-tibo', (_event, id) => showNotices(_event, id, 'tibo'));
         deps.ipcMain.handle('quota:read-tibo', () => tibo.view());
         deps.ipcMain.handle('quota:refresh-tibo', () => tibo.refresh(true));
@@ -420,6 +453,8 @@ function startCompanion(deps = loadElectronDeps()) {
                 isRefreshing: () => refreshing,
                 canReset: () => (latestState?.resetCredits?.availableCount ?? 0) > 0 && latestState?.isResetting === false,
                 onTrends: showTrends,
+                panelSettings: panelSettings.value,
+                onSettings: showSettings,
                 autoStartEnabled: autoStart?.enabled === true,
                 autoStartAvailable: !!autoStart && !changingAutoStart,
                 onToggleAutoStart: () => void toggleAutoStart(),
@@ -438,6 +473,8 @@ function startCompanion(deps = loadElectronDeps()) {
             },
             onQuit: quit,
             onTrends: showTrends,
+            panelSettings: panelSettings.value,
+            onSettings: showSettings,
             autoStartEnabled: autoStart?.enabled === true,
             autoStartAvailable: !!autoStart && !changingAutoStart,
             onToggleAutoStart: () => void toggleAutoStart(),

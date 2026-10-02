@@ -134,18 +134,20 @@
     const noticesButton = root.querySelector('[data-action="notices"]');
     const tiboButton = root.querySelector('[data-action="tibo"]');
     const orbNotice = root.querySelector('[data-orb-notice]');
+    const orbTibo = root.querySelector('[data-orb-tibo]');
     const noticeSummary = root.querySelector('[data-notice-summary]');
     const probabilityTag = root.querySelector('[data-probability-tag]');
     const probabilityPanel = root.querySelector('[data-probability-panel]');
     const probabilitySummary = root.querySelector('[data-action="notice-detail"]');
     const noticeSource = root.querySelector('[data-notice-source]');
     const alertSummary = root.querySelector('[data-alert-summary]');
-    let latestNotices;
+    let latestNotices, latestTibo, panelSettings = {};
     if (!orb || !details || !refresh || !reset || !resetCount || !creditPicker || !creditList || !pickerSelection || !creditError || !cancelReset || !confirmReset || !edgeHandle || !fiveHourRing || !weeklyRing || !fiveHourCenter || !weeklyCenter || !fiveHourText || !weeklyText || !fiveHourCountdown || !fiveHourResetAt || !weeklyCountdown || !weeklyResetAt || !lastUpdated || !fallback || !note) {
       throw new Error("Quota renderer markup is incomplete");
     }
     let interaction = "collapsed";
     let latestState;
+    let quotaOffline = false;
     let selectedCreditId;
     let resetPending = false;
     let edgeHidden = false;
@@ -199,6 +201,14 @@
         if (!seenNotices.has(key)) { seenNotices.add(key); newSummary('notices'); }
       }
     };
+    const quotaConnectionText = () => {
+      if (!quotaOffline) return '';
+      const status = latestState?.status === 'loading' ? '正在重连' : '连接失败';
+      if (!Number.isFinite(latestState?.lastUpdatedAt)) return `${status}，尚未成功读取额度`;
+      const minutes = Math.max(0, Math.floor((now() - latestState.lastUpdatedAt) / 60000));
+      const age = minutes < 1 ? '不足 1 分钟' : minutes < 60 ? `${minutes} 分钟` : minutes < 1440 ? `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟` : `${Math.floor(minutes / 1440)} 天 ${Math.floor(minutes % 1440 / 60)} 小时`;
+      return `${status}，额度为上次记录；距上次成功更新：${age}`;
+    };
     const updateOrbTooltip = () => {
       const messages = [];
       for (const [key, label] of [['fiveHour', '5 小时'], ['weekly', '周']]) {
@@ -212,8 +222,8 @@
       }
       const credits = (latestState?.alerts?.expiringCredits ?? []).filter(c => c.expiresAt > now());
       if (credits.length) messages.push(`重置卡：${credits.length} 张将在 24 小时内到期，最快剩余 ${formatCountdown(credits[0].expiresAt, now())}`);
-      if (latestNotices?.unread) messages.push(`重置动态：${latestNotices.unread} 条未读消息`);
-      if (messages.length && ['stale', 'error'].includes(latestState?.status)) messages.push('额度读取失败，以上额度为最近一次记录');
+      if (panelSettings.notices !== false && latestNotices?.unread) messages.push(`重置动态：${latestNotices.unread} 条未读消息`);
+      if (quotaOffline) messages.push(quotaConnectionText());
       orb.setAttribute('title', messages.join('\n') || '点击查看额度详情');
       orb.setAttribute('aria-label', messages.length ? `查看额度详情：${messages.join('；')}` : '查看额度详情');
     };
@@ -224,7 +234,7 @@
         if (summaryKinds.has('quota') && latestState?.alerts?.quotaBadge) messages.push(latestState.alerts.quotaBadge.text);
         const credits = (latestState?.alerts?.creditBadges ?? []).filter(c => c.expiresAt > now());
         if (summaryKinds.has('credits') && credits.length) messages.push(`${credits.length} 张重置卡将在 24 小时内到期`);
-        if (summaryKinds.has('notices') && latestNotices?.unread) messages.push(`${latestNotices.unread} 条未读消息`);
+        if (panelSettings.notices !== false && summaryKinds.has('notices') && latestNotices?.unread) messages.push(`${latestNotices.unread} 条未读消息`);
         if (messages.length && ['stale', 'error'].includes(latestState?.status)) messages.push('更新失败，以上为最近一次数据');
         alertSummary.textContent = messages.join('\n');
         alertSummary.hidden = !messages.length || now() >= summaryUntil || hoveringOrb || interaction !== 'collapsed' || edgeHidden || !creditPicker.hidden;
@@ -234,7 +244,7 @@
       const mode = !creditPicker.hidden ? "picker" : interaction === "pinned" ? "normal" : alertSummary && !alertSummary.hidden ? "summary" : "collapsed";
       const elements = mode === "picker" ? [details] : mode === "normal" ? [orb, details] : [orb];
       if (mode === 'summary') elements.push(alertSummary);
-      if (mode !== "picker") elements.push(...[orbLow, orbRecovered, orbExpiring, orbNotice].filter((element) => element && !element.hidden));
+      if (mode !== "picker") elements.push(...[orbLow, orbRecovered, orbExpiring, orbNotice, orbTibo].filter((element) => element && !element.hidden));
       if (mode !== "picker" && probabilityTag && !probabilityTag.hidden) elements.push(probabilityTag);
       const regions = elements.map((element) => {
         const { x, y, width, height } = element.getBoundingClientRect();
@@ -299,6 +309,8 @@
     };
     const renderState = (state) => {
       latestState = state;
+      if (state.status !== 'loading') quotaOffline = ['stale', 'error'].includes(state.status);
+      root.classList.toggle('is-quota-offline', quotaOffline);
       updateQuotaSummary(state);
       const model = buildRendererViewModel(state, now());
       root.classList.toggle('is-weekly-only', !model.showFiveHour);
@@ -324,7 +336,7 @@
       reset.disabled = model.resetDisabled;
       note.textContent = model.note ?? "";
       note.hidden = model.note === null;
-      fallback.textContent = `${model.planText}. ${model.showFiveHour ? `5 Hours ${model.fiveHourText}. ` : ''}Weekly ${model.weeklyText}.`;
+      fallback.textContent = `${model.planText}. ${model.showFiveHour ? `5 Hours ${model.fiveHourText}. ` : ''}Weekly ${model.weeklyText}.${quotaOffline ? ` ${quotaConnectionText()}` : ''}`;
       const alertWindows = state.alerts?.windows ?? {};
       const badge = state.alerts?.quotaBadge;
       const low = badge && badge.severity !== 'recovered';
@@ -470,10 +482,18 @@
     noticesButton?.addEventListener("click", onNotices);
     const onTibo = () => { void api.openTibo?.(); };
     tiboButton?.addEventListener('click', onTibo);
+    orbTibo?.addEventListener('click', onTibo);
     const renderTibo = state => {
+      latestTibo = state;
       const badge = root.querySelector('[data-tibo-badge]');
       const summary = root.querySelector('[data-tibo-summary]');
       if (badge) { badge.hidden = !state.unread; badge.textContent = state.unread > 99 ? '99+' : String(state.unread || 0); badge.setAttribute('aria-label', `${state.unread || 0} 条未读动态`); }
+      if (orbTibo) {
+        orbTibo.hidden = panelSettings.tibo === false || !state.unread;
+        orbTibo.textContent = state.unread > 99 ? '99+' : String(state.unread || 0);
+        orbTibo.title = `Tibo 动态：${state.unread || 0} 条未读`;
+        orbTibo.setAttribute('aria-label', orbTibo.title);
+      }
       if (summary) summary.textContent = state.error ? '同步失败 · 点击查看' : !state.configured ? '待配置数据源 · 点击查看' : state.loading ? '正在同步动态…' : '最近 30 天 · 中文阅读';
       syncWindowLayout();
     };
@@ -492,7 +512,7 @@
       latestNotices = state;
       updateNoticeSummary(state);
       if (orbNotice) {
-        orbNotice.hidden = !state.unread;
+        orbNotice.hidden = panelSettings.notices === false || !state.unread;
         orbNotice.textContent = state.unread > 99 ? '99+' : String(state.unread || 0);
         orbNotice.setAttribute('aria-label', `${state.unread || 0} 条未读消息`);
         orbNotice.title = `${state.unread || 0} 条未读消息，手动标记后清除`;
@@ -500,10 +520,10 @@
       if (noticeSummary) noticeSummary.textContent = state.unread ? `${state.unread} 条未读消息 · 点击查看` : !state.enabled ? "自动检查已关闭" : state.error ? "更新失败 · 点击查看" : state.loading ? "正在检查消息…" : state.records?.length ? "查看消息与账户状态 ›" : "暂无新动态 ›";
       const presentation = window.noticePresentation(state, now());
       if (probabilityTag) {
-        probabilityTag.hidden = state.showProbability !== true;
+        probabilityTag.hidden = panelSettings.notices === false || state.showProbability !== true;
         probabilityTag.textContent = presentation.tag;
         probabilityTag.dataset.tone = presentation.tone || 'neutral';
-        probabilityTag.title = `${presentation.heading} · ${presentation.note}`;
+        probabilityTag.title = `${presentation.heading} · ${presentation.note} · ${presentation.accountNote}`;
       }
       const probabilityValue = root.querySelector('[data-probability-value]');
       const probabilityNote = root.querySelector('[data-probability-note]');
@@ -519,6 +539,17 @@
     };
     const unsubscribeNotices = api.subscribeNotices?.(renderNotices);
     api.readNotices?.().then(renderNotices).catch(() => { if (noticeSummary) noticeSummary.textContent = "暂时无法读取 · 点击重试"; });
+    const renderPanelSettings = settings => {
+      panelSettings = settings;
+      for (const [key, element] of [['notices', probabilityPanel], ['notices', noticesButton], ['tibo', tiboButton], ['trends', trendsButton]]) {
+        if (element) element.hidden = settings[key] === false;
+      }
+      if (latestNotices) renderNotices(latestNotices);
+      if (latestTibo) renderTibo(latestTibo);
+      syncWindowLayout();
+    };
+    const unsubscribePanelSettings = api.subscribePanelSettings?.(renderPanelSettings);
+    api.readPanelSettings?.().then(renderPanelSettings).catch(() => {});
     expiryButton?.addEventListener("click", onReset);
     cancelReset.addEventListener("click", onCancelReset);
     confirmReset.addEventListener("click", onConfirmReset);
@@ -547,7 +578,9 @@
       unsubscribeOpenDetails?.();
       unsubscribeNotices?.();
       unsubscribeTibo?.();
+      unsubscribePanelSettings?.();
       tiboButton?.removeEventListener('click', onTibo);
+      orbTibo?.removeEventListener('click', onTibo);
       noticesButton?.removeEventListener("click", onNotices);
       orbNotice?.removeEventListener('click', onNotices);
       orbLow?.removeEventListener('click', openQuotaDetails);

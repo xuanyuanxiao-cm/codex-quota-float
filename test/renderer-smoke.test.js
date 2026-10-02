@@ -8,7 +8,7 @@ function element() {
   const properties = new Map();
   return {
     attributes: new Map(),
-    classList: { toggle() {} },
+    classList: { toggle(name, enabled) { this[name] = enabled; } },
     dataset: {},
     disabled: false,
     hidden: false,
@@ -25,7 +25,7 @@ function element() {
 }
 
 test('renders both quota rings and the two percentage-only center values', () => {
-  const now = new Date(2026, 7, 26, 12, 0).getTime();
+  let now = new Date(2026, 7, 26, 12, 0).getTime();
   class FixedDate extends Date {
     static now() { return now; }
   }
@@ -87,12 +87,14 @@ test('renders both quota rings and the two percentage-only center values', () =>
     setEdgeHidden() {},
     setLayout() {},
   };
+  let tickClock;
   const windowObject = {
     quota,
     addEventListener() {},
     removeEventListener() {},
     confirm: () => false,
     getComputedStyle: () => ({ borderTopLeftRadius: '0px' }),
+    setInterval(callback) { tickClock = callback; },
   };
   const context = {
     console,
@@ -134,6 +136,32 @@ test('renders both quota rings and the two percentage-only center values', () =>
   assert.equal(weeklyCountdown.textContent, '155h59m');
   assert.equal(fiveHourResetAt.textContent, '26Y 08M 26D 16:52');
   assert.equal(weeklyResetAt.textContent, '26Y 09M 01D 23:59');
+
+  const lastUpdatedAt = now - 5 * 60000;
+  const disconnected = {
+    status: 'stale', fiveHour: { remainingPercent: 82, resetsAt: null },
+    weekly: { remainingPercent: 64, resetsAt: null }, resetCredits: null,
+    lastUpdatedAt, errorMessage: '额度服务暂时无法连接',
+  };
+  renderState(disconnected);
+  assert.equal(root.classList['is-quota-offline'], true);
+  assert.equal(fiveHourCenter.textContent, '82%');
+  assert.equal(weeklyCenter.textContent, '64%');
+  assert.match(orb.attributes.get('title'), /连接失败.*上次记录/);
+  assert.match(orb.attributes.get('title'), /距上次成功更新：5 分钟/);
+  assert.match(selectors.get('[data-accessible-status]').textContent, /上次记录/);
+  now += 2 * 60000; tickClock();
+  assert.match(orb.attributes.get('title'), /距上次成功更新：7 分钟/);
+  renderState({ ...disconnected, status: 'loading' });
+  assert.equal(root.classList['is-quota-offline'], true, 'retrying does not make old quota look fresh');
+  assert.match(orb.attributes.get('title'), /正在重连/);
+  renderState({ ...disconnected, status: 'ready', lastUpdatedAt: now, errorMessage: null });
+  assert.equal(root.classList['is-quota-offline'], false);
+  assert.equal(orb.attributes.get('title'), '点击查看额度详情');
+  renderState({ status: 'error', resetCredits: null, lastUpdatedAt: null, errorMessage: '连接失败' });
+  assert.equal(root.classList['is-quota-offline'], true);
+  assert.match(orb.attributes.get('title'), /尚未成功读取额度/);
+  assert.doesNotMatch(orb.attributes.get('title'), /距上次成功更新/);
 
   const weeklyOnly = {
     status: 'ready', planType: 'pro', hasFiveHour: false,

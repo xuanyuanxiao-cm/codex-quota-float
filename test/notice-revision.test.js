@@ -14,7 +14,7 @@ function store(t, records, extra = {}) {
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const file = path.join(dir, 'notices.json');
     fs.writeFileSync(file, JSON.stringify({ version: 2, initialized: true, records, ...extra }));
-    const service = new ResetNotices(file, { now: () => NOW, canVerify: () => false });
+    const service = new ResetNotices(file, { now: () => NOW, loadOriginal: null });
     t.after(() => service.stop()); return service;
 }
 function record(id, text, extra = {}) { return { id, url: url(id), publishedAt: NOW - HOUR, text, originalText: text, verifiedAt: NOW - HOUR, verified: true, read: false, kind: 'reset', stage: 'announced', ...extra }; }
@@ -30,7 +30,7 @@ test('short Tibo promise is actionable but questions, negation and conditions ar
 test('archive retains more than 200 old unread messages across restart', t => {
     const records = Array.from({ length: 230 }, (_, i) => record(String(12345678000 + i), "We'll reset Codex usage limits.", { publishedAt: NOW - (40 + i) * DAY }));
     const s = store(t, records); s.persist();
-    const restarted = new ResetNotices(s.file, { now: () => NOW, canVerify: () => false });
+    const restarted = new ResetNotices(s.file, { now: () => NOW, loadOriginal: null });
     assert.equal(restarted.view().records.length, 230); assert.equal(restarted.view().unread, 230);
 });
 test('Sep 27 rejected original migrates once without treating rejection as failed authenticity', t => {
@@ -90,12 +90,10 @@ test('community summary edits preserve verified originals, translations and manu
     assert.equal(s.view().records[0].originalText, "We'll reset Codex usage limits.");
     assert.equal(s.view().unread, 0);
 });
-test('reverified cancellation restores one unread revision and duplicate checks do not increment it', async t => {
+test('a timeline cancellation restores one unread revision and duplicate imports do not increment it', t => {
     const s = store(t, [record('12345678901', "We'll reset Codex usage limits.", { read: true, manualReadAt: NOW - HOUR, source: 'community' })]);
-    s.canVerify = () => true;
-    s.loadCommunity = async () => snapshot(NOW, [{ id: '12345678901', time: NOW - HOUR, text: 'Updated community summary' }]);
-    s.scrapePage = async () => original('12345678901', 'The Codex reset is cancelled.');
-    await s.refresh();
+    const post = original('12345678901', 'The Codex reset is cancelled.');
+    s.importTiboPost(post); s.importTiboPost(post);
     assert.equal(s.view().unread, 1); assert.equal(s.view().records[0].revision, 2);
     assert.equal(noticePresentation(s.view(), NOW).tag, '预告已取消');
 });
@@ -128,21 +126,25 @@ test('unrelated questions do not veto an affirmative reset clause and wishes do 
 test('explicit linked completion replaces its own promise while a different future promise remains', () => {
     const records = [record('12345678901', "We'll reset Codex limits.", { eventId: 'one', publishedAt: NOW - HOUR }),
         record('12345678902', 'We reset Codex limits.', { eventId: 'one', stage: 'completed', publishedAt: NOW })];
-    assert.equal(noticePresentation({ records }, NOW).tag, '重置已完成');
+    const view = noticePresentation({ records }, NOW);
+    assert.equal(view.tag, '原帖称已重置');
+    assert.match(view.heading, /原帖 · 已读取/);
+    assert.match(view.accountNote, /不代表本账户已生效/);
+    assert.equal(view.tone, 'blue');
     records.push(record('12345678903', 'More resets coming next week', { eventId: 'two', publishedAt: NOW - HOUR }));
     assert.equal(noticePresentation({ records }, NOW).recordId, '12345678903');
 });
 test('verified explicit zoned deadline drives pending state; relative next week stays imprecise', async t => {
-    const s = store(t, []); s.canVerify = () => true;
+    const s = store(t, []);
     s.loadCommunity = async () => snapshot(NOW, [{ id: '12345678901', time: NOW - HOUR }]);
-    s.scrapePage = async () => original('12345678901', "We'll reset Codex usage limits by 2026-09-28T07:00:00Z.");
+    s.loadOriginal = async () => original('12345678901', "We'll reset Codex usage limits by 2026-09-28T07:00:00Z.");
     await s.refresh(); assert.equal(noticePresentation(s.view(), NOW).tag, '重置待确认');
     assert.equal(s.view().records[0].deadlineAt, NOW - HOUR);
 });
 test('a targeted replacement original cannot validate a broad reset prediction', async t => {
-    const s = store(t, []); s.canVerify = () => true;
+    const s = store(t, []);
     s.loadCommunity = async () => snapshot(NOW, [{ id: '12345678901', time: NOW - HOUR }]);
-    s.scrapePage = async () => original('12345678901', "We've added a banked reset for affected Codex users whose card failed.");
+    s.loadOriginal = async () => original('12345678901', "We've added a banked reset for affected Codex users whose card failed.");
     await s.refresh(); assert.equal(s.view().records[0].outcomeScope, 'targeted');
 });
 test('unreadable saved data is preserved instead of silently overwritten', t => {

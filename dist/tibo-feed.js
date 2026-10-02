@@ -20,16 +20,18 @@ class TiboFeed {
                 record.nextTranslationAt = Math.min(record.nextTranslationAt || 0, this.now() + 15 * 60000);
             }
         }
-        this.prune(); this.stopped = true; this.loading = false; this.error = null;
+        this.prune(); this.stopped = true; this.featureEnabled = true; this.loading = false; this.error = null;
     }
     prune() {
+        const count = this.saved.records.length;
         this.saved.records = this.saved.records.filter(r => r && /^\d{10,25}$/.test(r.id) && canonicalUrl(r.url) && typeof r.originalText === 'string' && Number.isFinite(r.publishedAt) && r.publishedAt > this.now() - RETENTION && r.publishedAt <= this.now() + 60000 && (!this.saved.suppressedBefore || r.publishedAt > this.saved.suppressedBefore))
             .sort((a, b) => b.publishedAt - a.publishedAt);
+        if (count !== this.saved.records.length) this.pruned = true;
     }
     persist() {
         if (this.storageError?.includes('读取')) return false;
         this.prune();
-        try { fs.writeFileSync(this.file + '.tmp', JSON.stringify(this.saved)); fs.renameSync(this.file + '.tmp', this.file); this.storageError = null; return true; }
+        try { fs.writeFileSync(this.file + '.tmp', JSON.stringify(this.saved)); fs.renameSync(this.file + '.tmp', this.file); this.storageError = null; this.pruned = false; return true; }
         catch { this.storageError = '无法保存动态；本次修改尚未确认，请检查数据目录'; return false; }
     }
     commit(change) {
@@ -49,7 +51,26 @@ class TiboFeed {
             coverage: this.saved.coverage, incomplete: Boolean(this.saved.sync), bytes: Buffer.byteLength(JSON.stringify(this.saved)) };
     }
     emit() { this.onChange(this.view()); }
-    start() { this.stopped = false; this.persist(); this.schedule(); this.scheduleTranslation(); this.cleanupTimer = setInterval(() => { this.persist(); this.emit(); }, 60000); this.cleanupTimer.unref?.(); }
+    start() {
+        this.stopped = false; if (this.featureEnabled || this.pruned) this.persist(); this.schedule(); this.scheduleTranslation();
+        this.cleanupTimer = setInterval(() => {
+            const count = this.saved.records.length, previousError = this.storageError;
+            this.prune();
+            const saved = this.pruned ? this.persist() : false;
+            if (count !== this.saved.records.length || saved || previousError !== this.storageError) this.emit();
+        }, 60000);
+        this.cleanupTimer.unref?.();
+    }
+    setFeatureEnabled(enabled) {
+        this.featureEnabled = enabled;
+        if (!enabled) {
+            clearTimeout(this.timer); clearTimeout(this.translationTimer); this.abort?.abort();
+            if (!this.saved.featurePaused) this.commit(() => { this.saved.featurePaused = true; });
+        } else if (this.saved.featurePaused) {
+            this.commit(() => { this.saved.featurePaused = false; this.saved.initializedAt = this.now(); this.saved.sync = null; this.saved.lastAttemptAt = null; });
+        }
+        this.schedule(); this.scheduleTranslation(); this.emit();
+    }
     stop() { this.stopped = true; clearTimeout(this.timer); clearTimeout(this.translationTimer); clearInterval(this.cleanupTimer); this.abort?.abort(); }
     prioritize(id) { this.priorityId = typeof id === 'string' ? id : null; this.priorityUntil = this.now() + 120000; }
     translationCandidates() {
@@ -58,7 +79,7 @@ class TiboFeed {
     }
     scheduleTranslation() {
         clearTimeout(this.translationTimer);
-        if (this.stopped || !this.source.canTranslate()) return;
+        if (this.stopped || !this.featureEnabled || !this.source.canTranslate()) return;
         this.translationTimer = setTimeout(async () => {
             try {
                 if (!this.pending && !this.translating && !(this.translationBlockedUntil > this.now())) {
@@ -72,7 +93,7 @@ class TiboFeed {
     }
     schedule() {
         clearTimeout(this.timer);
-        if (!this.stopped) { this.timer = setTimeout(() => { void this.refresh(); }, Math.max(0, this.nextCheckAt() - this.now())); this.timer.unref?.(); }
+        if (!this.stopped && this.featureEnabled) { this.timer = setTimeout(() => { void this.refresh(); }, Math.max(0, this.nextCheckAt() - this.now())); this.timer.unref?.(); }
     }
     markRead(items) {
         if (Array.isArray(items)) this.commit(() => {
@@ -88,8 +109,10 @@ class TiboFeed {
         this.emit(); return this.view();
     }
     async refresh(manual = false) {
+        if (!this.featureEnabled) return this.view();
         if (this.pending) return this.pending;
         if (this.translating) await this.translating;
+        if (!this.featureEnabled) return this.view();
         if (this.pending) return this.pending;
         if (this.stopped && this.abort?.signal.aborted) return this.view();
         const dueAt = manual ? this.view().manualCheckAt : this.nextCheckAt();
@@ -144,6 +167,7 @@ class TiboFeed {
             this.publishRelated();
             this.loading = false; this.emit();
             await this.translate(signal);
+            signal.throwIfAborted();
             this.publishRelated();
             this.persist();
         } catch (error) {
@@ -158,12 +182,15 @@ class TiboFeed {
         }
     }
     async translatePost(id) {
+        if (!this.featureEnabled) return this.view();
         while (this.pending || this.translating) await (this.pending || this.translating);
+        if (!this.featureEnabled) return this.view();
         if (this.stopped && this.abort?.signal.aborted) return this.view();
         const record = this.saved.records.find(r => r.id === id);
         if (!record || record.lastTranslationAttemptAt > this.now() - MANUAL_INTERVAL) return this.view();
         this.abort = new AbortController(); this.translationError = null;
-        this.translating = this.translate(this.abort.signal, id).then(() => { this.publishRelated(); this.persist(); this.emit(); return this.view(); })
+        const signal = this.abort.signal;
+        this.translating = this.translate(signal, id).then(() => { signal.throwIfAborted(); this.publishRelated(); this.persist(); this.emit(); return this.view(); })
             .finally(() => { this.translating = null; });
         return this.translating;
     }
@@ -172,6 +199,7 @@ class TiboFeed {
         if (this.translationBlockedUntil > this.now()) { this.translationError = 'FxTwitter 请求受限，稍后自动重试'; return; }
         const candidates = selectedId ? this.saved.records.filter(r => r.id === selectedId) : this.translationCandidates().slice(0, 5);
         for (const item of candidates) {
+            signal.throwIfAborted();
             try {
                 this.translatingId = item.id; this.emit();
                 item.lastTranslationAttemptAt = this.now();
@@ -191,7 +219,7 @@ class TiboFeed {
                 this.emit();
             } catch (error) {
                 if (signal.aborted) throw error;
-                this.translationError = /^(FxTwitter|Firecrawl)/.test(error.message) ? error.message : '部分原帖或翻译暂不可用，将显示原文并稍后重试';
+                this.translationError = /^FxTwitter/.test(error.message) ? error.message : '部分原帖或翻译暂不可用，将显示原文并稍后重试';
                 this.commit(() => { const current = this.saved.records.find(r => r.id === item.id); if (current) { current.nextTranslationAt = this.now() + 15 * 60000; current.translationStatus = current.chineseText ? 'done' : 'unavailable'; } });
                 if (/受限/.test(this.translationError)) this.translationBlockedUntil = this.now() + 3600000;
                 if (/余额|凭据|权限|受限/.test(this.translationError)) break;

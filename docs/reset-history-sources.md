@@ -7,7 +7,7 @@ Sources:
 - [Tibo Reset Lab announcement catalogue](https://github.com/CRF2004/tibo-reset-lab/blob/main/data/processed/reset_announcements.csv)
 - [Tibo Reset Lab source index](https://github.com/CRF2004/tibo-reset-lab/blob/main/data/raw/sources.csv)
 
-Only source-linked rows are included. The research catalogue's summarized `raw_text` field is treated as a community summary, never authenticated verbatim text. Observatory rows may carry an event timestamp rather than original publication time, explicitly marked `archive-event`. Rows without exact post URLs and periodic-account references are excluded. The research catalogue ends in July; neither source supplies a complete August timeline or all service replies. Community records remain unverified until the existing original-post verifier succeeds, and backfill stays read.
+Only source-linked rows are included. The research catalogue's summarized `raw_text` field is treated as a community summary, never authenticated verbatim text. Observatory rows may carry an event timestamp rather than original publication time, explicitly marked `archive-event`. Rows without exact post URLs and periodic-account references are excluded. The research catalogue ends in July; neither source supplies a complete August timeline or all service replies. Community summaries remain distinct from originals until FxTwitter returns matching post content, and backfill stays read. The legacy verified fields record original retrieval, not independent fact checking.
 
 `scripts/backfill-reset-history.ps1` regenerates the snapshot without executing upstream code. It does not change user data. It is a one-time archive importer, not a new forecasting source, live poller or model.
 

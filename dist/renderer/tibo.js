@@ -3,7 +3,7 @@
     const api = window.quota, $ = id => document.getElementById(id), put = (id, text) => window.readerText($(id), text);
     const time = value => Number.isFinite(value) ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '尚未检查';
     const types = { post: '原帖', reply: '回复', quote: '引用', repost: '转推', unknown: '推文' };
-    let state, filter = 'all', busy = false, shownId, requestedId, translatingId;
+    let state, filter = 'unread', busy = false, shownId, requestedId, translatingId;
     const reader = new window.MessageReader($('feed-list'), r => [
         (r.chineseText || r.originalText || '媒体动态').replace(/\s+/g, ' ').slice(0, 64),
         `${types[r.type] || '推文'} · ${time(r.publishedAt)} · ${r.read ? '已读' : '未读'}${r.originalText && !r.chineseText ? ` · ${translationLabel(r)}` : ''}`,
@@ -29,7 +29,9 @@
         put('translate', r && (state.translatingId === r.id || translatingId === r.id) ? '正在翻译…' : translationWait ? `${translationWait} 秒后可重试` : r?.chineseText ? '翻译上下文' : r?.lastTranslationAttemptAt ? '重试翻译' : '优先翻译');
     }
     function render(next) {
+        const selectedId = reader.selectedId;
         state = next; reader.accept(state.records);
+        reader.selectedId = state.records.some(r => r.id === selectedId) ? selectedId : null;
         if (requestedId && state.records.some(r => r.id === requestedId)) { const id = requestedId; requestedId = null; reader.select(id); return; }
         renderClock();
         put('sync', `动态${state.loading ? '正在更新' : '最近获取'}：${time(state.lastReceivedAt || state.lastSuccessAt)} · 下次检查：${time(state.nextCheckAt)}`);
@@ -69,7 +71,7 @@
         renderClock();
     }
     $('refresh').addEventListener('click', async () => { busy = true; renderClock(); await act(() => api.refreshTibo()); busy = false; renderClock(); });
-    $('new-posts').addEventListener('click', () => { reader.showNew(); render(state); });
+    $('new-posts').addEventListener('click', () => { reader.ids = state.records.map(r => r.id); render(state); });
     $('mark-read').addEventListener('click', () => { const r = reader.selected(); if (r) void act(() => api.markTiboRead([{ id: r.id, revision: r.revision }])); });
     $('read-all').addEventListener('click', () => void act(() => api.markTiboRead(reader.visible().map(r => ({ id: r.id, revision: r.revision })))));
     $('open-source').addEventListener('click', () => { if (reader.selected()) void act(() => api.openTiboSource(reader.selectedId)); });
@@ -82,7 +84,14 @@
     $('clear-no').addEventListener('click', () => { $('clear-confirm').hidden = true; });
     $('clear-yes').addEventListener('click', async () => { await act(() => api.clearTibo()); $('clear-confirm').hidden = true; });
     const off = api.subscribeTibo(render);
-    const offSelection = api.subscribeTiboSelection(id => { requestedId = id; if (state) render(state); });
+    const offSelection = api.subscribeTiboSelection(id => {
+        requestedId = typeof id === 'string' ? id : null;
+        if (!requestedId) {
+            reader.selectedId = null; reader.ids = null; shownId = null; filter = 'unread';
+            window.closeMessageDetail(); void api.prioritizeTibo(null);
+        }
+        if (state) render(state);
+    });
     void api.readTibo().then(render).catch(showError);
     const timer = setInterval(renderClock, 1000);
     window.addEventListener('unload', () => { off(); offSelection(); clearInterval(timer); void api.prioritizeTibo(null); });

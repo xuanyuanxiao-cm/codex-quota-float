@@ -5,8 +5,8 @@
     const time = value => Number.isFinite(value) ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '尚未检查';
     const titles = { reset: '额度重置消息', banked: '重置卡消息', limits: '额度与重置卡规则', hint: '重置相关讨论', service: '服务动态', arrival: '账户新增重置卡' };
     const stage = r => r.stage === 'cancelled' ? '已取消' : r.stage === 'in-progress' ? '进行中' : r.kind === 'hint' ? '相关讨论 · 非明确承诺' : r.kind === 'service' ? '服务动态' : r.kind === 'limits' ? '规则信息' : r.stage === 'completed' ? r.kind === 'banked' ? '已发卡' : '已完成' : '已预告';
-    const status = r => r.kind === 'arrival' ? '账户检查发现' : r.verified ? `${stage(r)} · 原帖已核验` : r.verificationStatus === 'rejected' ? '原帖已读取 · 待重新分类' : '社区收录 · 待核验';
-    let state, selectedId, checking = false, filter = 'all', shownId, translating = false;
+    const status = r => r.kind === 'arrival' ? '账户检查发现' : r.verified ? `${r.stage === 'completed' || r.stage === 'in-progress' ? '原帖称' : ''}${stage(r)} · 原帖已读取` : r.verificationStatus === 'rejected' ? '原帖已读取 · 待重新分类' : ['unreadable', 'network-error'].includes(r.verificationStatus) ? '原帖暂不可读' : '社区收录 · 原帖待读取';
+    let state, selectedId, checking = false, filter = 'unread', shownId, translating = false;
     const put = (id, value) => window.readerText($(id), value);
     const reader = new window.MessageReader($('history'), r => [(r.chineseText && r.translationOriginalText === r.originalText ? r.chineseText : r.originalText || r.text || titles[r.kind] || titles.hint).replace(/\s+/g, ' ').slice(0, 64),
         `${r.verified && !r.read ? '未读 · ' : ''}${status(r)} · ${time(r.publishedAt)}`
@@ -63,15 +63,15 @@
         put('title', record ? titles[record.kind] || titles.hint : '暂无收录消息');
         $('published').textContent = record ? `${record.kind === 'arrival' ? '检查发现时间' : record.timestampBasis === 'archive-event' ? '存档事件时间（原帖发布时间未核实）' : '收录发布时间'}：${time(record.publishedAt)}` : '';
         const summaries = { hint: '这是重置相关讨论，包含疑问、否定或条件时，不解释为明确承诺。', service: '服务故障、恢复或致歉不等于承诺补偿，不自动提高预测概率。', limits: '额度或重置卡规则信息，不等同于一次重置。', arrival: record?.text };
-        $('summary').textContent = !record ? '目前没有收录的相关消息。' : !record.verified ? '社区收录，尚未核验原帖；来源有覆盖缺口，不能据此确认你的账户已到账。' : summaries[record.kind] || (record.stage === 'cancelled' ? '安排已取消，以最新原文为准。' : record.stage === 'completed' ? '原帖确认已完成，账户实际生效情况仍需单独确认。' : record.stage === 'in-progress' ? '原帖表示正在执行，尚未确认全部完成。' : '明确预告；具体时间、适用范围和重置方式以原文为准，未说明的部分保留未知。');
-        $('source').textContent = record ? `${record.kind === 'arrival' ? '账户检测' : `Tibo · @thsottiaux ／ ${record.verified ? '本地原帖核验通过' : '社区收录 · 待核验'}`}。${record.read && record.manualReadAt ? '已手动标记已读' : record.processingReason || (record.read ? '已读' : '待手动标记')}。${record.archiveSource ? `补录来源：${record.archiveSource}` : ''}` : '';
+        $('summary').textContent = !record ? '目前没有收录的相关消息。' : !record.verified ? '社区收录，尚未读取原帖；来源有覆盖缺口，不能据此确认你的账户已到账。' : summaries[record.kind] || (record.stage === 'cancelled' ? '原帖表示安排已取消，以最新原文为准。' : record.stage === 'completed' ? '原帖表示已完成，账户实际生效情况仍需单独确认。' : record.stage === 'in-progress' ? '原帖表示正在执行，尚未确认全部完成。' : '正文被识别为预告；具体时间、适用范围和重置方式以原文为准，未说明的部分保留未知。');
+        $('source').textContent = record ? `${record.kind === 'arrival' ? '账户检测' : `Tibo · @thsottiaux ／ ${record.verified ? '原帖已读取，进展由正文规则识别' : '社区收录 · 原帖待读取'}`}。${record.read && record.manualReadAt ? '已手动标记已读' : record.processingReason?.replaceAll('核验', '读取') || (record.read ? '已读' : '待手动标记')}。${record.archiveSource ? `补录来源：${record.archiveSource}` : ''}` : '';
         $('original').hidden = !record?.url; $('quote-wrap').hidden = !record;
         $('quote-label').textContent = record?.originalText ? '查看读取到的原帖' : '查看社区收录内容';
         put('quote', record?.originalText || record?.text || '');
         const translated = record?.chineseText && record.translationOriginalText === record.originalText;
         $('translation-wrap').hidden = !record;
         put('quote-zh', translated ? record.chineseText : record?.originalText || record?.text || '');
-        put('translation-state', !record ? '' : !record.originalText ? record.kind === 'arrival' ? '本账户检查记录' : '社区收录摘要 · 非已核验原文' : translated ? '机器翻译 · 以原文为准' : state.translatingId === record.id ? '正在翻译…' : record.translationStatus === 'unavailable' || record.translationAttempts ? '暂未取得译文 · 原文可读' : '等待翻译 · 原文可读');
+        put('translation-state', !record ? '' : !record.originalText ? record.kind === 'arrival' ? '本账户检查记录' : '社区收录摘要 · 原帖待读取' : translated ? '机器翻译 · 以原文为准' : state.translatingId === record.id ? '正在翻译…' : record.translationStatus === 'unavailable' || record.translationAttempts ? '暂未取得译文 · 原文可读' : '等待翻译 · 原文可读');
         $('translate-notice').hidden = !state.translationEnabled || !record?.verified || !record.originalText || Boolean(translated && (!record.context?.originalText || record.context.chineseText));
         $('notice-context').hidden = !record?.context;
         if (record?.context) {
@@ -101,13 +101,10 @@
         $('filter-all').setAttribute('aria-pressed', String(filter === 'all'));
         $('filter-unread').setAttribute('aria-pressed', String(filter === 'unread'));
         put('filter-unread', `未读 ${state.unread}`);
-        $('coverage').textContent = state.coverage?.note || '记录长期保存；来源仅覆盖部分公开消息，无法保证完整时间线。';
-        const journal = state.forecastHistory;
-        $('prediction-history').textContent = journal ? `预测记录 ${journal.total} 次 · 待观察 ${journal.pending} · 有事件证据 ${journal.events} · 无法评价 ${journal.unscorable}。未发现事件不代表未发生；尚不计算准确率。` : '';
         const fresh = state.forecast?.healthy && Date.now() - state.forecast.asOf <= 21600000;
         $('community-health').textContent = `社区接口：${state.error || (fresh ? '正常' : '数据过期或尚不可用')} · ${time(state.lastSuccessAt)}`;
-        const verification = { verified: '原帖可信，内容含义单独分类', rejected: '等待重新分类', unreadable: '原文暂不可读，将重试', 'network-error': '网络失败，等待重试', observed: '账户检查发现' };
-        $('verification-health').textContent = `当前核验：${verification[record?.verificationStatus] || (!state.verificationEnabled ? '核验未配置，保留为社区收录' : '等待核验')}${record?.nextVerificationAt ? ` · 重试不早于 ${time(record.nextVerificationAt)}` : ''}`;
+        const verification = { verified: '原帖已读取，内容进展由规则识别，账户生效情况需另行确认', rejected: '等待重新分类', unreadable: '原帖暂不可读，将重试', 'network-error': '原帖暂不可读，等待重试', observed: '账户检查发现' };
+        $('verification-health').textContent = `原帖读取：${verification[record?.verificationStatus] || (record ? '等待 FxTwitter 返回原文' : '尚无收录消息')}${record?.nextVerificationAt ? ` · 重试不早于 ${time(record.nextVerificationAt)}` : ''}`;
     }
     $('check').addEventListener('click', async () => {
         renderCheck();

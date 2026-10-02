@@ -44,14 +44,14 @@ test('stale flags, wall-clock expiry and fetch errors all suppress percentages',
 test('unread limit changes do not masquerade as resets; a grant does not imply quota recovery', () => {
     const state = { forecast: { asOf: NOW, healthy: true, percent: 35 }, unread: 2, records: [{ kind: 'limits', verified: true }] };
     assert.equal(noticePresentation(state, NOW).value, '35%');
-    assert.equal(noticePresentation({ ...state, activeNotice: { kind: 'banked', stage: 'completed', verified: true } }, NOW).value, '已发放重置卡');
+    assert.equal(noticePresentation({ ...state, activeNotice: { kind: 'banked', stage: 'completed', verified: true } }, NOW).value, '原帖称已发卡');
 });
 
 test('panel distinguishes a community completion report from a verified original announcement', () => {
     const state = { forecast: { asOf: NOW, healthy: true, percent: 10 }, activeNotice: { id: '12345678901', kind: 'reset', stage: 'completed', verified: false },
         records: [{ id: 'older', kind: 'reset', stage: 'completed', verified: true }, { id: '12345678901', kind: 'reset', stage: 'announced', verified: true }] };
     const view = noticePresentation(state, NOW);
-    assert.equal(view.tag, '社区记录重置');
+    assert.equal(view.tag, '社区称已重置');
     assert.equal(view.detailTitle, '社区报告已重置');
     assert.match(view.explanation, /原帖只确认了预告/);
     assert.deepEqual(view.evidence, [['社区记录', '报告已执行重置'], ['Tibo 原帖', '明确预告将重置额度']]);
@@ -67,6 +67,8 @@ test('panel names the source and stage for every reset and card announcement', (
         const view = noticePresentation({ forecast: { asOf: NOW, healthy: true }, activeNotice: { kind, stage, verified } }, NOW);
         assert.ok(view.detailTitle.startsWith(verified ? 'Tibo' : '社区'));
         assert.match(view.detailTitle, stage === 'announced' ? /预告/ : /已/);
+        assert.match(view.tag, stage === 'announced' ? /预告/ : /称已/);
+        assert.equal(view.tag.startsWith('社区'), !verified);
         assert.match(view.evidence[1][1], verified ? /明确/ : /尚未/);
         assert.equal(view.tag.includes('\n'), false);
         if (kind === 'banked') assert.match(view.accountNote, /手动使用.*不等于额度恢复/);
@@ -76,6 +78,7 @@ test('panel names the source and stage for every reset and card announcement', (
 test('forecast and unavailable states explain numbers and the specific data problem', () => {
     const state = { forecast: { asOf: NOW, healthy: true, percent: 10 } };
     assert.match(noticePresentation(state, NOW).explanation, /不是你的额度剩余比例/);
+    assert.equal(noticePresentation(state, NOW).tag, '预测 · 10%');
     assert.match(noticePresentation(state, NOW + MAX_AGE + 1).explanation, /超过 6 小时/);
     assert.match(noticePresentation({ ...state, error: '网络连接失败' }, NOW).explanation, /网络连接失败/);
     assert.match(noticePresentation({}, NOW).explanation, /尚未取得社区数据/);

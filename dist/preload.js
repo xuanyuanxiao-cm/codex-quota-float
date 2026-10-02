@@ -24,6 +24,14 @@ const subscribeOpenDetails = (listener) => {
     return () => electron_1.ipcRenderer.removeListener('quota:open-details', handler);
 };
 electron_1.contextBridge.exposeInMainWorld('quota', {
+    setPanelItem: (key, enabled) => electron_1.ipcRenderer.invoke('quota:set-panel-item', key, enabled),
+    closeSettings: () => electron_1.ipcRenderer.invoke('quota:close-settings'),
+    readPanelSettings: () => electron_1.ipcRenderer.invoke('quota:read-panel-settings'),
+    subscribePanelSettings: (listener) => {
+        const handler = (_event, settings) => listener(settings);
+        electron_1.ipcRenderer.on('quota:panel-settings', handler);
+        return () => electron_1.ipcRenderer.removeListener('quota:panel-settings', handler);
+    },
     openTibo: (id) => electron_1.ipcRenderer.invoke('quota:open-tibo', id),
     readTibo: () => electron_1.ipcRenderer.invoke('quota:read-tibo'),
     refreshTibo: () => electron_1.ipcRenderer.invoke('quota:refresh-tibo'),

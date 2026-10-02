@@ -20,6 +20,12 @@ test('Chinese translation is accepted only for the requested post and target lan
     assert.equal((await source.hydrate(record)).chineseText, '中文');
     status.translation.target_lang = 'fr'; assert.equal((await source.hydrate(record)).chineseText, null);
     status.id = '12345678902'; await assert.rejects(() => source.hydrate(record), /身份/);
+    status.id = '12345678901'; status.author.screen_name = 'another';
+    await assert.rejects(() => source.hydrate(record), /身份/);
+    status.author.screen_name = 'thsottiaux'; status.url = 'https://x.com/another/status/12345678901';
+    await assert.rejects(() => source.hydrate(record), /身份/);
+    status.url = record.url;
+    await assert.rejects(() => source.hydrate({ ...record, id: '12345678902' }), /身份/);
 });
 test('HTTP and embedded upstream failures are not empty successful timelines', async () => {
     const fail = createTiboSource({ fetchImpl: async () => ({ ok: false, status: 429 }) });

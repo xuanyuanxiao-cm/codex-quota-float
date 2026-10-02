@@ -5,6 +5,46 @@ const os = require('node:os');
 const path = require('node:path');
 const { TiboFeed, INTERVAL, RETENTION } = require('../dist/tibo-feed');
 const DAY = 86400000;
+test('feature pause cancels collection, blocks translation and resumes history silently across restart', async t => {
+    const s = setup(t); await s.feed.refresh(); s.advance(INTERVAL);
+    s.source.loadPage = async () => ({ records: [s.post(12345678901)], cursor: null });
+    await s.feed.refresh(); assert.equal(s.feed.view().unread, 1);
+    s.advance(INTERVAL); let release;
+    s.source.loadPage = () => new Promise(resolve => { release = resolve; });
+    const pending = s.feed.refresh();
+    s.feed.setFeatureEnabled(false);
+    const pausedFile = fs.readFileSync(s.file, 'utf8');
+    release({ records: [s.post(12345678902)], cursor: null }); await pending;
+    assert.equal(fs.readFileSync(s.file, 'utf8'), pausedFile, 'late collection cannot write after pause');
+    let requests = 0; s.source.loadPage = async () => { requests++; return { records: [], cursor: null }; };
+    s.source.hydrate = async () => { requests++; return {}; };
+    await s.feed.refresh(true); await s.feed.translatePost('12345678901'); assert.equal(requests, 0);
+    s.advance(INTERVAL);
+    const missed = s.post(12345678902);
+    const restarted = new TiboFeed(s.file, { source: s.source, now: s.now }); t.after(() => restarted.stop());
+    restarted.setFeatureEnabled(false); restarted.start();
+    await restarted.refresh(true); assert.equal(requests, 0);
+    restarted.setFeatureEnabled(true);
+    s.source.loadPage = async () => ({ records: [missed], cursor: null });
+    await restarted.refresh(true);
+    assert.equal(restarted.view().records.find(r => r.id === missed.id).read, true);
+    assert.equal(restarted.view().records.find(r => r.id === '12345678901').read, false, 'existing unread stays unread');
+    s.advance(INTERVAL); s.source.loadPage = async () => ({ records: [s.post(12345678903)], cursor: null });
+    await restarted.refresh(); assert.equal(restarted.view().unread, 2);
+});
+
+test('pausing in-flight translation discards the late result without writing', async t => {
+    const s = setup(t); await s.feed.refresh(); s.advance(INTERVAL);
+    s.source.loadPage = async () => ({ records: [s.post(12345678901)], cursor: null }); await s.feed.refresh();
+    s.source.canTranslate = () => true; let release;
+    s.source.hydrate = () => new Promise(resolve => { release = resolve; });
+    const translating = s.feed.translatePost('12345678901');
+    s.feed.setFeatureEnabled(false); const paused = fs.readFileSync(s.file, 'utf8');
+    release({ originalText: 'A product update.', chineseText: '迟到译文' });
+    await assert.rejects(translating);
+    assert.equal(fs.readFileSync(s.file, 'utf8'), paused);
+    assert.equal(s.feed.view().records[0].chineseText, null);
+});
 function setup(t, options = {}) {
     let now = Date.parse('2026-10-02T00:00:00Z');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tibo-feed-'));
@@ -16,6 +56,62 @@ function setup(t, options = {}) {
     const post = (id, publishedAt = now - 10000) => ({ id: String(id), url: `https://x.com/thsottiaux/status/${id}`, publishedAt, type: 'post', originalText: 'A product update.' });
     return { feed, source, file, post, now: () => now, advance: ms => { now += ms; } };
 }
+
+test('idle cleanup neither writes the cache nor broadcasts unchanged feed state', async t => {
+    const s = setup(t); await s.feed.refresh();
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+    s.feed.start();
+    const write = t.mock.method(fs, 'writeFileSync');
+    const change = t.mock.fn(); s.feed.onChange = change;
+    for (let i = 0; i < 3; i++) { s.advance(60000); t.mock.timers.tick(60000); }
+    assert.equal(write.mock.callCount(), 0);
+    assert.equal(change.mock.callCount(), 0);
+    s.feed.stop(); t.mock.timers.reset();
+});
+
+for (const paused of [false, true]) {
+    test(`cleanup persists expired unread posts once while feature is ${paused ? 'paused' : 'enabled'}`, async t => {
+        const s = setup(t);
+        s.source.loadPage = async () => ({ records: [s.post(12345678901, s.now() - RETENTION + 60000)], cursor: null });
+        await s.feed.refresh();
+        s.feed.saved.records[0].read = false; s.feed.persist();
+        if (paused) s.feed.setFeatureEnabled(false);
+        t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] }); s.feed.start();
+        const write = t.mock.method(fs, 'writeFileSync');
+        const change = t.mock.fn(); s.feed.onChange = change;
+        s.advance(60000); t.mock.timers.tick(60000);
+        assert.equal(JSON.parse(fs.readFileSync(s.file)).records.length, 0);
+        assert.equal(write.mock.callCount(), 1);
+        assert.equal(change.mock.callCount(), 1);
+        assert.equal(change.mock.calls[0].arguments[0].unread, 0);
+        s.advance(60000); t.mock.timers.tick(60000);
+        assert.equal(write.mock.callCount(), 1);
+        assert.equal(change.mock.callCount(), 1);
+        s.feed.stop(); t.mock.timers.reset();
+    });
+}
+
+test('failed expiry cleanup retries saving and reports only error changes', async t => {
+    const s = setup(t);
+    s.source.loadPage = async () => ({ records: [s.post(12345678901, s.now() - RETENTION + 60000)], cursor: null });
+    await s.feed.refresh();
+    t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] }); s.feed.start();
+    const writeFile = fs.writeFileSync; let fail = true;
+    const write = t.mock.method(fs, 'writeFileSync', (...args) => { if (fail) throw Error('disk full'); return writeFile(...args); });
+    const change = t.mock.fn(); s.feed.onChange = change;
+    s.advance(60000); t.mock.timers.tick(60000);
+    assert.equal(JSON.parse(fs.readFileSync(s.file)).records.length, 1);
+    assert.equal(change.mock.callCount(), 1);
+    assert.match(change.mock.calls[0].arguments[0].error, /无法保存/);
+    s.advance(60000); t.mock.timers.tick(60000);
+    assert.equal(write.mock.callCount(), 2);
+    assert.equal(change.mock.callCount(), 1);
+    fail = false; s.advance(60000); t.mock.timers.tick(60000);
+    assert.equal(JSON.parse(fs.readFileSync(s.file)).records.length, 0);
+    assert.equal(change.mock.callCount(), 2);
+    assert.equal(change.mock.calls[1].arguments[0].error, null);
+    s.feed.stop(); t.mock.timers.reset();
+});
 test('first import is read, subsequent new posts persist unread with a 30 minute interval', async t => {
     const s = setup(t); let calls = 0; let rows = [s.post(12345678901)];
     s.source.loadPage = async () => { calls++; return { records: rows, cursor: null }; };
@@ -54,8 +150,8 @@ test('translation does not duplicate or acknowledge posts and failures retain or
     const s = setup(t); await s.feed.refresh(); s.advance(INTERVAL);
     s.source.canTranslate = () => true;
     s.source.loadPage = async () => ({ records: [s.post(12345678901)], cursor: null });
-    s.source.hydrate = async () => { throw Error('Firecrawl 余额不足'); };
-    await s.feed.refresh(); assert.equal(s.feed.view().unread, 1); assert.ok(s.feed.view().translationError.includes('余额'));
+    s.source.hydrate = async () => { throw Error('FxTwitter 请求受限，稍后自动重试'); };
+    await s.feed.refresh(); assert.equal(s.feed.view().unread, 1); assert.ok(s.feed.view().translationError.includes('受限'));
     s.advance(6 * 3600000); s.source.hydrate = async r => ({ originalText: r.originalText, chineseText: '产品更新。' });
     await s.feed.refresh(); assert.equal(s.feed.view().records[0].chineseText, '产品更新。'); assert.equal(s.feed.view().unread, 1);
 });
@@ -74,8 +170,8 @@ test('storage failure rolls back read state and failed page writes do not advanc
     s.feed.file = path.join(s.file, 'bad'); s.feed.markRead(s.feed.view().records);
     assert.equal(s.feed.view().unread, 1); assert.ok(s.feed.view().error.includes('无法保存'));
 });
-test('discovery snippets remain hidden until authenticated original retrieval', async t => {
-    const s = setup(t, { source: 'firecrawl', canTranslate: () => true });
+test('discovery snippets remain hidden until matching original retrieval', async t => {
+    const s = setup(t, { source: 'fxtwitter', canTranslate: () => true });
     s.source.loadPage = async () => ({ records: [{ ...s.post(12345678901), originalText: '' }], cursor: null });
     s.source.hydrate = async () => { throw Error('unreadable'); };
     await s.feed.refresh(); assert.equal(s.feed.view().pending, 1); assert.equal(s.feed.view().records.length, 0);
