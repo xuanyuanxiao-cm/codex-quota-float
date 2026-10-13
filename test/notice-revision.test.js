@@ -33,6 +33,31 @@ test('loading a banked reset is an ongoing distribution, without treating negati
     assert.equal(classifyPost("We aren't loading a banked reset.").stage, 'hint');
     assert.equal(classifyPost('Loading a banked reset if the outage lasts.').stage, 'hint');
 });
+test('global resets promised by end of day are announcements, without implying completion', () => {
+    for (const text of ['Global reset landing by EOD PST time. Enjoy', 'Global reset by EOD. May the tokens do good things for you.', 'Global reset by the end of the day.']) {
+        assert.deepEqual(classifyPost(text), { kind: 'reset', stage: 'announced' });
+    }
+    for (const text of ['Global reset by EOD?', 'Global reset by EOD if the outage lasts.', "Global reset won't land by EOD.", 'I hope for a global reset by EOD.', 'We discussed a global reset by EOD yesterday.', 'The global reset by EOD failed yesterday.']) {
+        assert.equal(classifyPost(text).stage, 'hint');
+    }
+    assert.deepEqual(classifyPost('Global reset completed by EOD.'), { kind: 'reset', stage: 'completed' });
+});
+
+test('cached end-of-day reset becomes the newest panel announcement while retaining acknowledgement', t => {
+    const text = 'Global reset landing by EOD PST time. Enjoy';
+    const s = store(t, [
+        record('2103963215885701493', 'More resets coming next week', { publishedAt: NOW - 10 * DAY }),
+        record('2109812360596865224', text, { publishedAt: NOW - HOUR, kind: 'hint', stage: 'hint', read: true, manualReadAt: NOW - 1000, revision: 2 })
+    ], { version: 3 });
+    const latest = s.view().records.find(r => r.id === '2109812360596865224');
+    assert.equal(latest.kind, 'reset'); assert.equal(latest.stage, 'announced');
+    assert.equal(latest.read, true); assert.equal(latest.manualReadAt, NOW - 1000); assert.equal(latest.revision, 2);
+    const presentation = noticePresentation(s.view(), NOW);
+    assert.equal(presentation.recordId, '2109812360596865224');
+    assert.equal(presentation.tag, '重置预告');
+    assert.equal(latest.deadlineAt, undefined, 'relative EOD wording must not invent a precise timestamp');
+});
+
 test('cached verified hints are reclassified on restart without changing manual acknowledgement', t => {
     const s = store(t, [record('2107913674593644711', "Loading a banked reset in everyone's paid accounts.", {
         kind: 'hint', stage: 'hint', read: true, manualReadAt: NOW - HOUR, revision: 2,
@@ -62,6 +87,23 @@ test('archive retains more than 200 old unread messages across restart', t => {
     const s = store(t, records); s.persist();
     const restarted = new ResetNotices(s.file, { now: () => NOW, loadOriginal: null });
     assert.equal(restarted.view().records.length, 230); assert.equal(restarted.view().unread, 230);
+});
+test('notice history shows a newer read reset before an older unread reset', t => {
+    const s = store(t, [
+        record('12345678901', "We'll reset Codex usage limits.", { publishedAt: NOW - 2 * HOUR }),
+        record('12345678902', "We'll reset Codex usage limits tomorrow.", { publishedAt: NOW - HOUR, read: true, manualReadAt: NOW })
+    ], { version: 3 });
+    assert.deepEqual(s.view().records.map(r => r.id), ['12345678902', '12345678901']);
+    assert.equal(s.view().unread, 1);
+    assert.equal(s.view().records[0].read, true);
+});
+test('notice history shows newer service and discussion posts before an older reset', t => {
+    const s = store(t, [
+        record('12345678901', "We'll reset Codex usage limits.", { publishedAt: NOW - 2 * HOUR }),
+        record('12345678902', 'Will we reset Codex limits?', { kind: 'hint', stage: 'hint', publishedAt: NOW - HOUR }),
+        record('12345678903', 'Sorry about the Codex server outage.', { kind: 'service', stage: 'hint', publishedAt: NOW - HOUR / 2 })
+    ], { version: 3 });
+    assert.deepEqual(s.view().records.map(r => r.id), ['12345678903', '12345678902', '12345678901']);
 });
 test('Sep 27 rejected original migrates once without treating rejection as failed authenticity', t => {
     const s = store(t, [record('2103963215885701493', 'Sorry Gia. More resets coming next week', { verified: false, read: true, kind: 'hint', stage: 'hint', verificationStatus: 'rejected', eligible: true })]);

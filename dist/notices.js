@@ -1,7 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const { createTiboSource } = require('./tibo-source');
-const { classifyPost, messagePriority, explicitDeadline } = require('./notice-rules');
+const { classifyPost, explicitDeadline } = require('./notice-rules');
 const { recordForecast, forecastSummary } = require('./forecast-journal');
 const { createHash } = require('node:crypto');
 const { fetchCommunity, parseCommunity, postUrl, INTERVAL, MAX_AGE } = require('./community-reset');
@@ -87,7 +87,7 @@ class ResetNotices {
         const activeNotice = record && record.kind !== 'unrelated' && record.verificationStatus !== 'rejected' && (!record.verified || record.kind === c.active.kind && ['announced', 'completed'].includes(record.stage))
             ? { ...c.active, verified: record.verified && record.stage === c.active.stage } : null;
         const { accountBaselines, forecasts, ...publicState } = this.saved;
-        return { ...publicState, forecastHistory: forecastSummary(this.saved), records: records.filter(r => r.kind !== 'unrelated').map(r => ({ ...r })).sort((a, b) => Number(a.read !== false) - Number(b.read !== false) || messagePriority(a) - messagePriority(b) || b.publishedAt - a.publishedAt), loading: this.loading, error: this.error,
+        return { ...publicState, forecastHistory: forecastSummary(this.saved), records: records.filter(r => r.kind !== 'unrelated').map(r => ({ ...r })).sort((a, b) => b.publishedAt - a.publishedAt), loading: this.loading, error: this.error,
             nextCheckAt: this.saved.enabled ? this.nextCheckAt() : null, manualCheckAt: this.manualCheckAt(),
             translationEnabled: Boolean(this.translateOriginal), translatingId: this.translatingId || null,
             forecast: c ? { asOf: c.asOf, percent: c.percent, healthy: c.healthy } : null, activeNotice,

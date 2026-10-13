@@ -25,17 +25,13 @@ function classifyPost(value) {
         banked && /\bloading\s+(?:(?:a|the)\s+)?banked resets?\b/i.test(text)) return { kind, stage: 'in-progress' };
     if (/\bresets?\b.{0,40}\b(?:completed|propagated|done)\b|\b(?:limits|quota)\b.{0,40}\b(?:have been|has been|were|was|are) reset\b|\bwe(?:'ve| have)?\s+reset\b|已完成|已发放/i.test(text) ||
         banked && /\b(?:sent|added|granted|distributed|issued|gave)\b.{0,80}\b(?:banked reset|reset credit)|\b(?:banked resets?|reset credits?)\b.{0,40}\b(?:sent|added|granted|distributed|issued)\b/i.test(text)) return { kind, stage: 'completed' };
+    if (/^\s*(?:global\s+)?resets?\s+(?:landing\s+)?by\s+(?:eod|(?:the\s+)?end of (?:the\s+)?day)(?:\s+(?:pst|pdt|pt)(?:\s+time)?)?[.!]?\s*$/i.test(text)) return { kind, stage: 'announced' };
     if (banked && /\b(?:giving|sending|issuing|distributing)\b/i.test(text)) return { kind, stage: 'announced' };
     return hint;
-}
-function messagePriority(record) {
-    if (record.kind === 'arrival') return 1;
-    if (['reset', 'banked', 'limits'].includes(record.kind)) return 0;
-    return record.kind === 'service' ? 3 : 2;
 }
 function explicitDeadline(text) {
     const match = text.match(/\b(?:by|before|until)\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))/i);
     const value = match ? Date.parse(match[1]) : NaN;
     return Number.isFinite(value) ? value : null;
 }
-module.exports = { classifyPost, messagePriority, explicitDeadline };
+module.exports = { classifyPost, explicitDeadline };
