@@ -145,22 +145,31 @@ test('renders both quota rings and the two percentage-only center values', () =>
   };
   renderState(disconnected);
   assert.equal(root.classList['is-quota-offline'], true);
+  assert.equal(selectors.get('[data-action="refresh"]').disabled, false);
   assert.equal(fiveHourCenter.textContent, '82%');
   assert.equal(weeklyCenter.textContent, '64%');
   assert.match(orb.attributes.get('title'), /连接失败.*上次记录/);
   assert.match(orb.attributes.get('title'), /距上次成功更新：5 分钟/);
+  assert.match(orb.attributes.get('title'), /每 5 分钟自动重试/);
+  assert.match(orb.attributes.get('title'), /手动刷新/);
   assert.match(selectors.get('[data-accessible-status]').textContent, /上次记录/);
   now += 2 * 60000; tickClock();
   assert.match(orb.attributes.get('title'), /距上次成功更新：7 分钟/);
   renderState({ ...disconnected, status: 'loading' });
   assert.equal(root.classList['is-quota-offline'], true, 'retrying does not make old quota look fresh');
+  assert.equal(selectors.get('[data-action="refresh"]').disabled, true);
   assert.match(orb.attributes.get('title'), /正在重连/);
+  assert.doesNotMatch(orb.attributes.get('title'), /每 5 分钟自动重试/);
   renderState({ ...disconnected, status: 'ready', lastUpdatedAt: now, errorMessage: null });
   assert.equal(root.classList['is-quota-offline'], false);
+  assert.equal(selectors.get('[data-action="refresh"]').disabled, false);
   assert.equal(orb.attributes.get('title'), '点击查看额度详情');
   renderState({ status: 'error', resetCredits: null, lastUpdatedAt: null, errorMessage: '连接失败' });
   assert.equal(root.classList['is-quota-offline'], true);
+  assert.equal(selectors.get('[data-action="refresh"]').disabled, false);
   assert.match(orb.attributes.get('title'), /尚未成功读取额度/);
+  assert.match(orb.attributes.get('title'), /每 5 分钟自动重试/);
+  assert.match(orb.attributes.get('title'), /手动刷新/);
   assert.doesNotMatch(orb.attributes.get('title'), /距上次成功更新/);
 
   const weeklyOnly = {

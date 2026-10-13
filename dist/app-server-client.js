@@ -122,6 +122,7 @@ class AppServerClient {
             await this.start();
         }
         this.lastAccountKey = accountKey;
+        const child = this.child;
         return this.sendRequest('account/rateLimits/read', undefined, (result) => {
             if (accountKey !== this.getAccountKey()) throw new Error('Account changed during quota read');
             if (!isRecord(result) || !('rateLimits' in result)) {
@@ -137,6 +138,9 @@ class AppServerClient {
             // Apply the reply before parsing any later notification in this chunk.
             onReading?.(reading);
             return reading;
+        }).catch((error) => {
+            if (child) this.disconnectChild(child, error);
+            throw error;
         });
     }
     consumeRateLimitResetCredit(creditId) {

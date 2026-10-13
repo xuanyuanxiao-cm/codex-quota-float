@@ -46,6 +46,8 @@ class ResetNotices {
             }
             this.saved.version = 3;
         }
+        // Apply corrected rules to authenticated hints without altering their read state.
+        for (const r of this.saved.records) if (r.verified && r.originalText && r.kind === 'hint') Object.assign(r, classifyPost(r.originalText));
         this.error = this.saved.failures > 0 ? '社区上次更新失败，请稍后重试' : null;
         this.loading = false; this.account = null; this.recoveries = {}; this.cardArrival = null;
         this.featureEnabled = true;

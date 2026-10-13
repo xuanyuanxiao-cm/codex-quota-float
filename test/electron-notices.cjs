@@ -93,6 +93,16 @@ async function capture(win, name) {
     assert.equal(windows.length, 1, 'opening the original must not also open the reader');
     assert.equal(handlers.get('quota:read-notices')().unread, 1, 'opening an original does not acknowledge a reset announcement');
     const panelState = handlers.get('quota:read-notices')();
+    windows[0].webContents.send('quota:notices', { ...panelState, activeNotice: null, records: [
+        { id: '2103963215885701493', url: url('2103963215885701493'), kind: 'reset', stage: 'announced', verified: true,
+            publishedAt: Date.now() - 11 * 24 * HOUR, originalText: 'More resets coming next week' },
+        { id: '2107913674593644711', url: url('2107913674593644711'), kind: 'banked', stage: 'in-progress', verified: true,
+            publishedAt: Date.now() - HOUR, originalText: "Loading a banked reset in everyone's paid accounts." }
+    ] });
+    await until(() => evaluate(windows[0], 'document.querySelector("[data-probability-heading]").textContent === "Tibo · 原帖称发卡中"'));
+    assert.match(await evaluate(windows[0], 'document.querySelector("[data-probability-note]").textContent'), /Loading a banked reset/);
+    assert.equal(await evaluate(windows[0], 'document.querySelector("[data-notice-source]").dataset.recordId'), '2107913674593644711',
+        'newer distribution replaces the old preview and its original link');
     for (const kind of ['reset', 'banked']) for (const stage of ['completed', 'in-progress']) {
         const tag = `原帖称${stage === 'completed' ? '已' : ''}${kind === 'reset' ? '重置' : '发卡'}${stage === 'in-progress' ? '中' : ''}`;
         windows[0].webContents.send('quota:notices', { ...panelState, activeNotice: null,
@@ -204,6 +214,7 @@ async function capture(win, name) {
     assert.equal(handlers.get('quota:read-notices')().enabled, false);
     await capture(windows[1], 'paused-manual-success');
     const reported = handlers.get('quota:read-notices')();
+    reported.account = null; // Isolate community/original stage checks from newer account observations.
     reported.forecast.asOf = Date.now();
     reported.activeNotice.stage = 'completed'; reported.activeNotice.verified = false;
     windows[0].webContents.send('quota:notices', reported); windows[1].webContents.send('quota:notices', reported);

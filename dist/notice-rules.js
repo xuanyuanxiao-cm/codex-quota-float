@@ -21,7 +21,8 @@ function classifyPost(value) {
     if (/\b(?:expire|expires|expiration|expiry|valid|how to|every (?:day|week|month))\b|有效期|使用规则/i.test(text)) return { kind: 'limits', stage: 'announced' };
     const kind = banked ? 'banked' : 'reset';
     if (/\b(?:will|we'll|going to|coming|tomorrow|next week|later today|by midnight|soon)\b|即将|下周|明天/i.test(text)) return { kind, stage: 'announced' };
-    if (/\b(?:resetting|rolling out|in progress|propagating)\b|正在重置/i.test(text)) return { kind, stage: 'in-progress' };
+    if (/\b(?:resetting|rolling out|in progress|propagating)\b|正在重置/i.test(text) ||
+        banked && /\bloading\s+(?:(?:a|the)\s+)?banked resets?\b/i.test(text)) return { kind, stage: 'in-progress' };
     if (/\bresets?\b.{0,40}\b(?:completed|propagated|done)\b|\b(?:limits|quota)\b.{0,40}\b(?:have been|has been|were|was|are) reset\b|\bwe(?:'ve| have)?\s+reset\b|已完成|已发放/i.test(text) ||
         banked && /\b(?:sent|added|granted|distributed|issued|gave)\b.{0,80}\b(?:banked reset|reset credit)|\b(?:banked resets?|reset credits?)\b.{0,40}\b(?:sent|added|granted|distributed|issued)\b/i.test(text)) return { kind, stage: 'completed' };
     if (banked && /\b(?:giving|sending|issuing|distributing)\b/i.test(text)) return { kind, stage: 'announced' };

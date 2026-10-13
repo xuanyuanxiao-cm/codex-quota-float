@@ -13,7 +13,7 @@ function noticePresentation(state, now = Date.now()) {
         (r.stage === 'announced' ? (/\bnext week\b|下周/i.test(r.originalText || r.text) ? 14 : 2) : 1) * DAY;
     const candidates = [...latest.values()].filter(r => Number.isFinite(r.publishedAt) && r.publishedAt <= now + 60000 && expires(r) > now &&
         (r.kind !== 'arrival' || !r.accountKey || r.accountKey === state.account?.accountKey));
-    candidates.sort((a, b) => Number(b.stage === 'announced') - Number(a.stage === 'announced') || (b.changedAt || b.publishedAt) - (a.changedAt || a.publishedAt));
+    candidates.sort((a, b) => (b.changedAt || b.publishedAt) - (a.changedAt || a.publishedAt));
     const local = candidates[0];
     if (local) {
         const banked = local.kind === 'banked', event = banked ? '发卡' : '重置';

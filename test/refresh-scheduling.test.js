@@ -67,6 +67,39 @@ for (const hadSuccess of [false, true]) test(`exhausted retries produce ${hadSuc
   if (hadSuccess) assert.deepEqual(s.controller.state.weekly, previous.weekly);
 });
 
+for (const hadSuccess of [false, true]) test(`automatic refresh keeps retrying every five minutes after ${hadSuccess ? 'stale data' : 'an initial error'}`, async t => {
+  const s = setup(t);
+  if (hadSuccess) await s.controller.start();
+  const fail = () => Promise.reject(Error('offline'));
+  s.queue.push(...Array(6).fill(fail));
+  const pending = hadSuccess ? s.controller.refreshNow() : s.controller.start();
+  await flush(); await s.tick(2000); await s.tick(5000); await pending;
+  const failedReads = s.reads();
+  await s.tick(299999); assert.equal(s.reads(), failedReads);
+  await s.tick(1); assert.equal(s.reads(), failedReads + 1);
+  await s.tick(2000); await s.tick(5000);
+  assert.equal(s.controller.state.status, hadSuccess ? 'stale' : 'error');
+  await s.tick(299999); assert.equal(s.reads(), failedReads + 3);
+  await s.tick(1);
+  assert.equal(s.reads(), failedReads + 4);
+  assert.equal(s.controller.state.status, 'ready');
+  assert.equal(s.controller.state.fiveHour.remainingPercent, 80);
+});
+
+test('manual refresh recovers immediately after failure and replaces the scheduled retry', async t => {
+  const s = setup(t); await s.controller.start();
+  s.queue.push(...Array.from({ length: 3 }, () => () => Promise.reject(Error('offline'))));
+  const pending = s.controller.refreshNow();
+  await flush(); await s.tick(2000); await s.tick(5000); await pending;
+  await s.tick(60000);
+  await s.controller.refreshNow();
+  assert.equal(s.controller.state.status, 'ready');
+  assert.equal(s.reads(), 5);
+  await s.tick(240000); assert.equal(s.reads(), 5);
+  await s.tick(59999); assert.equal(s.reads(), 5);
+  await s.tick(1); assert.equal(s.reads(), 6);
+});
+
 test('sparse notifications retain the other window and leave only one refresh timer', async t => {
   const s = setup(t); await s.controller.start();
   s.emit({ primary: { usedPercent: 55 } });

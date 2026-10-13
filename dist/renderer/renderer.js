@@ -204,10 +204,11 @@
     const quotaConnectionText = () => {
       if (!quotaOffline) return '';
       const status = latestState?.status === 'loading' ? '正在重连' : '连接失败';
-      if (!Number.isFinite(latestState?.lastUpdatedAt)) return `${status}，尚未成功读取额度`;
+      const retry = latestState?.status === 'loading' ? '' : '；每 5 分钟自动重试，也可右键“立即刷新”手动刷新';
+      if (!Number.isFinite(latestState?.lastUpdatedAt)) return `${status}，尚未成功读取额度${retry}`;
       const minutes = Math.max(0, Math.floor((now() - latestState.lastUpdatedAt) / 60000));
       const age = minutes < 1 ? '不足 1 分钟' : minutes < 60 ? `${minutes} 分钟` : minutes < 1440 ? `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟` : `${Math.floor(minutes / 1440)} 天 ${Math.floor(minutes % 1440 / 60)} 小时`;
-      return `${status}，额度为上次记录；距上次成功更新：${age}`;
+      return `${status}，额度为上次记录；距上次成功更新：${age}${retry}`;
     };
     const updateOrbTooltip = () => {
       const messages = [];

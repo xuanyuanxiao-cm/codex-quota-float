@@ -108,6 +108,41 @@ test('failed initialization cleans up the live child before a new attempt', asyn
   assert.equal(children.length, 2);
 });
 
+test('a rejected quota read releases the failed connection so manual refresh can recover', async (t) => {
+  const { controller, children } = setup(t, (request, child, attempt) => {
+    if (attempt === 1 && request.method === 'account/rateLimits/read') {
+      child.reply({ id: request.id, error: { message: 'quota service unavailable' } });
+      return false;
+    }
+  });
+  await controller.start();
+  assert.equal(controller.state.status, 'error');
+  await controller.refreshNow();
+  assert.equal(controller.state.status, 'ready');
+  assert.equal(controller.state.fiveHour.remainingPercent, 20);
+  assert.equal(children[0].killed, true);
+  assert.equal(children.length, 2);
+});
+
+test('automatic refresh reconnects five minutes after a quota read is rejected', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1700000000000 });
+  const { controller, children } = setup(t, (request, child, attempt) => {
+    if (attempt === 1 && request.method === 'account/rateLimits/read') {
+      child.reply({ id: request.id, error: { message: 'quota service unavailable' } });
+      return false;
+    }
+  });
+  await controller.start();
+  assert.equal(controller.state.status, 'error');
+  t.mock.timers.tick(299999); await flush();
+  assert.equal(children.length, 1);
+  assert.equal(controller.state.status, 'error');
+  t.mock.timers.tick(1); await flush();
+  assert.equal(controller.state.status, 'ready');
+  assert.equal(controller.state.fiveHour.remainingPercent, 20);
+  assert.equal(children.length, 2);
+});
+
 for (const method of ['initialize', 'account/rateLimits/read']) {
   test(`${method} times out and the next read reconnects`, async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });

@@ -27,6 +27,36 @@ test('short Tibo promise is actionable but questions, negation and conditions ar
     assert.equal(classifyPost('Banked resets expire after 30 days.').kind, 'limits');
     assert.equal(classifyPost('The Codex reset announced earlier is cancelled.').stage, 'cancelled');
 });
+test('loading a banked reset is an ongoing distribution, without treating negation as confirmation', () => {
+    const text = "Day 3/\n\nThe big one is GPT-6 in Chat, but today is also a little celebration day with a new high of 40M active users across Codex and ChatGPT Work.\n\nLoading a banked reset in everyone's paid accounts. See you again tomorrow!";
+    assert.deepEqual(classifyPost(text), { kind: 'banked', stage: 'in-progress' });
+    assert.equal(classifyPost("We aren't loading a banked reset.").stage, 'hint');
+    assert.equal(classifyPost('Loading a banked reset if the outage lasts.').stage, 'hint');
+});
+test('cached verified hints are reclassified on restart without changing manual acknowledgement', t => {
+    const s = store(t, [record('2107913674593644711', "Loading a banked reset in everyone's paid accounts.", {
+        kind: 'hint', stage: 'hint', read: true, manualReadAt: NOW - HOUR, revision: 2,
+        chineseText: '正在向所有付费账户发放重置卡。', translationOriginalText: "Loading a banked reset in everyone's paid accounts."
+    })], { version: 3 });
+    const cached = s.view().records[0];
+    assert.equal(cached.kind, 'banked'); assert.equal(cached.stage, 'in-progress');
+    assert.equal(cached.read, true); assert.equal(cached.manualReadAt, NOW - HOUR); assert.equal(cached.revision, 2);
+    assert.equal(cached.chineseText, '正在向所有付费账户发放重置卡。');
+    assert.equal(noticePresentation(s.view(), NOW).tag, '原帖称发卡中');
+    s.persist();
+    const restarted = new ResetNotices(s.file, { now: () => NOW, loadOriginal: null });
+    t.after(() => restarted.stop());
+    assert.equal(restarted.view().records[0].kind, 'banked'); assert.equal(restarted.view().unread, 0);
+});
+test('newer distribution and account arrival replace an older next-week promise in the panel', () => {
+    const records = [record('2103963215885701493', 'More resets coming next week', { publishedAt: NOW - 11 * DAY }),
+        record('2107913674593644711', "Loading a banked reset in everyone's paid accounts.", { kind: 'banked', stage: 'in-progress', publishedAt: NOW - HOUR })];
+    const view = noticePresentation({ records }, NOW);
+    assert.equal(view.recordId, '2107913674593644711'); assert.equal(view.tag, '原帖称发卡中');
+    records.push(record('arrival-new', '本次检查发现 1 张新增重置卡', { kind: 'arrival', stage: 'completed', count: 1, publishedAt: NOW, accountKey: 'account-a' }));
+    assert.equal(noticePresentation({ records, account: { accountKey: 'account-a' } }, NOW).recordId, 'arrival-new');
+    assert.equal(noticePresentation({ records, account: { accountKey: 'account-b' } }, NOW).recordId, '2107913674593644711');
+});
 test('archive retains more than 200 old unread messages across restart', t => {
     const records = Array.from({ length: 230 }, (_, i) => record(String(12345678000 + i), "We'll reset Codex usage limits.", { publishedAt: NOW - (40 + i) * DAY }));
     const s = store(t, records); s.persist();
@@ -123,7 +153,7 @@ test('unrelated questions do not veto an affirmative reset clause and wishes do 
     assert.equal(classifyPost('I hope we get a reset next week.').stage, 'hint');
     assert.equal(classifyPost('Reset Codex configuration tomorrow.').kind, 'unrelated');
 });
-test('explicit linked completion replaces its own promise while a different future promise remains', () => {
+test('explicit linked completion replaces its own promise and the latest event is displayed', () => {
     const records = [record('12345678901', "We'll reset Codex limits.", { eventId: 'one', publishedAt: NOW - HOUR }),
         record('12345678902', 'We reset Codex limits.', { eventId: 'one', stage: 'completed', publishedAt: NOW })];
     const view = noticePresentation({ records }, NOW);
@@ -132,6 +162,8 @@ test('explicit linked completion replaces its own promise while a different futu
     assert.match(view.accountNote, /不代表本账户已生效/);
     assert.equal(view.tone, 'blue');
     records.push(record('12345678903', 'More resets coming next week', { eventId: 'two', publishedAt: NOW - HOUR }));
+    assert.equal(noticePresentation({ records }, NOW).recordId, '12345678902');
+    records[2].publishedAt = NOW + 1000;
     assert.equal(noticePresentation({ records }, NOW).recordId, '12345678903');
 });
 test('verified explicit zoned deadline drives pending state; relative next week stays imprecise', async t => {
