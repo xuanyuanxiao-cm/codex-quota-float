@@ -375,23 +375,25 @@
       renderInteraction();
       if (interaction === 'pinned') void api.dismissAlert?.('quota');
     };
-    const hideToEdge = () => {
-      interaction = "collapsed";
-      renderInteraction();
-      void api.setEdgeHidden(true);
-    };
     const clickArbiter = createClickArbiter(togglePinned);
-    const onOrbClick = () => {
+    let interactionBeforeClick;
+    const onOrbClick = (event) => {
       if (movedDuringDrag) {
         clickArbiter.cancelSingle();
         return;
       }
+      if ((event.detail ?? 1) < 2) interactionBeforeClick = interaction;
       clickArbiter.scheduleSingle();
     };
     const onOrbDoubleClick = () => {
       clickArbiter.cancelSingle();
       if (movedDuringDrag) return;
-      hideToEdge();
+      if (interactionBeforeClick !== void 0 && interaction !== interactionBeforeClick) {
+        interaction = interactionBeforeClick;
+        renderInteraction();
+      }
+      interactionBeforeClick = void 0;
+      onRefresh();
     };
     const onOrbPointerDown = (event) => {
       if (event.button !== 0) return;

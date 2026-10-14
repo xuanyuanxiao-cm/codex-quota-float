@@ -66,6 +66,60 @@ for (const notificationLast of [true, false]) test(`quota messages retain wire o
   if (notificationLast) assert.equal(notifications.some(message => message?.severity === 'recovered'), false);
 });
 
+test('a quota reply with only the reset-card count updates quota and restores details on the next read', async (t) => {
+  let detailsAvailable = false;
+  const { controller, children } = setup(t, (request, child) => {
+    if (request.method !== 'account/rateLimits/read') return;
+    child.reply({ id: request.id, result: {
+      ...reading,
+      rateLimitResetCredits: detailsAvailable ? reading.rateLimitResetCredits : { availableCount: 3, credits: null },
+    } });
+    return false;
+  });
+  await controller.start();
+  assert.equal(controller.state.status, 'ready');
+  assert.equal(controller.state.errorMessage, null);
+  assert.equal(controller.state.fiveHour.remainingPercent, 20);
+  assert.ok(Number.isFinite(controller.state.lastUpdatedAt));
+  assert.deepEqual(controller.state.resetCredits, { availableCount: 3, credits: [] });
+  assert.deepEqual(await controller.resetQuota(), { outcome: 'noCredit' });
+  children[0].reply({ method: 'account/rateLimits/updated', params: { rateLimits: { primary: { usedPercent: 40 } } } });
+  assert.equal(controller.state.fiveHour.remainingPercent, 60);
+  assert.deepEqual(controller.state.resetCredits, { availableCount: 3, credits: [] });
+  detailsAvailable = true;
+  await controller.refreshNow();
+  assert.equal(controller.state.status, 'ready');
+  assert.deepEqual(controller.state.resetCredits, reading.rateLimitResetCredits);
+  assert.equal(children.length, 1, 'missing card details must not disconnect the healthy quota connection');
+  assert.equal(children[0].killed, false);
+});
+
+test('automatic quota refresh succeeds when reset-card details are unavailable', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1700000000000 });
+  let reads = 0;
+  const { controller, children } = setup(t, (request, child) => {
+    if (request.method !== 'account/rateLimits/read') return;
+    if (++reads !== 2) return;
+    child.reply({ id: request.id, result: {
+      rateLimits: { primary: { usedPercent: 50, windowDurationMins: 300 } },
+      rateLimitResetCredits: { availableCount: 3, credits: null },
+    } });
+    return false;
+  });
+  await controller.start();
+  t.mock.timers.tick(300000); await flush();
+  assert.equal(controller.state.status, 'ready');
+  assert.equal(controller.state.errorMessage, null);
+  assert.equal(controller.state.fiveHour.remainingPercent, 50);
+  assert.equal(controller.state.lastUpdatedAt, Date.now());
+  assert.deepEqual(controller.state.resetCredits, { availableCount: 3, credits: [] });
+  t.mock.timers.tick(300000); await flush();
+  assert.equal(controller.state.status, 'ready');
+  assert.equal(controller.state.fiveHour.remainingPercent, 20);
+  assert.deepEqual(controller.state.resetCredits, reading.rateLimitResetCredits);
+  assert.equal(children.length, 1);
+});
+
 test('Refresh retries initialization after the initial connection fails', async (t) => {
   const { controller, children } = setup(t, (request, child, attempt) => {
     if (attempt === 1 && request.method === 'initialize') {

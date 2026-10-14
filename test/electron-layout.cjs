@@ -17,7 +17,8 @@ const fixture = {
   },
   rateLimitResetCredits: { availableCount: 1, credits: [{ id: 'test-only', status: 'available', expiresAt: 1800000000 }] },
 };
-AppServerClient.prototype.readRateLimits = async () => fixture;
+let quotaReads = 0;
+AppServerClient.prototype.readRateLimits = async () => { quotaReads++; return fixture; };
 AppServerClient.prototype.consumeRateLimitResetCredit = async () => { throw new Error('Consumption is forbidden in this test'); };
 let quotaWindow;
 let updateBackdrop;
@@ -62,9 +63,9 @@ const waitFor = async (predicate, label) => {
 };
 const evaluate = (script) => quotaWindow.webContents.executeJavaScript(script);
 const hit = (x, y) => shapes.at(-1).some((r) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height);
-const mouseClick = (x, y) => {
-  quotaWindow.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
-  quotaWindow.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+const mouseClick = (x, y, clickCount = 1) => {
+  quotaWindow.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount });
+  quotaWindow.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount });
 };
 // Native Windows bounds can round outward by two DIPs at fractional display scaling.
 const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - height) <= 2;
@@ -81,6 +82,16 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   const background = await evaluate(`getComputedStyle(document.body).backgroundColor`);
   assert.equal(background, 'rgba(0, 0, 0, 0)');
 
+  await waitFor(() => quotaReads > 0, 'initial quota read');
+  const collapsedReads = quotaReads;
+  mouseClick(50, 50);
+  mouseClick(50, 50, 2);
+  await waitFor(() => quotaReads === collapsedReads + 1, 'collapsed double-click refresh');
+  await new Promise(resolve => setTimeout(resolve, 250));
+  assert.equal(layouts.at(-1).mode, 'collapsed');
+  assert.equal(await evaluate(`document.querySelector('[data-quota-app]').classList.contains('is-edge-hidden')`), false);
+  dragActions.length = 0;
+
   mouseClick(50, 50);
   await waitFor(() => layouts.at(-1)?.mode === 'normal', 'expanded layout');
   const normalHeight = Math.ceil(await evaluate(`document.querySelector('[data-quota-app]').getBoundingClientRect().height`));
@@ -90,6 +101,14 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   assert.equal(hit(140, 60), false);
   assert.equal(hit(140, 105), false);
   assert.equal(hit(140, 180), true);
+
+  const expandedReads = quotaReads;
+  mouseClick(236, 58);
+  mouseClick(236, 58, 2);
+  await waitFor(() => quotaReads === expandedReads + 1, 'expanded double-click refresh');
+  await new Promise(resolve => setTimeout(resolve, 250));
+  assert.equal(layouts.at(-1).mode, 'normal');
+  assert.equal(await evaluate(`document.querySelector('[data-quota-app]').classList.contains('is-edge-hidden')`), false);
 
   assert.equal(await evaluate(`document.querySelector('[data-plan]').textContent`), 'Plus');
   const dualWindows = fixture.rateLimits;
@@ -177,7 +196,7 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb')).filter`), 'none');
   assert.equal(await evaluate(`document.querySelector('.orb').title`), '点击查看额度详情');
   fs.writeFileSync(path.join(previewDir, 'orb-connected.png'), (await quotaWindow.webContents.capturePage()).toPNG());
-  console.log(JSON.stringify({ electronLayout: 'passed', scaleFactor: electron.screen.getPrimaryDisplay().scaleFactor, normalHeight, pickerHeight: 360, cardConsumption: 0 }));
+  console.log(JSON.stringify({ electronLayout: 'passed', doubleClickRefresh: true, scaleFactor: electron.screen.getPrimaryDisplay().scaleFactor, normalHeight, pickerHeight: 360, cardConsumption: 0 }));
   if (!process.argv.includes('--interactive')) {
     app.quit();
     return;

@@ -31,8 +31,11 @@ function element(initialClasses = []) {
   };
 }
 
-test('opens the details panel only after clicking the orb', async () => {
+function mount() {
   const expandedChanges = [];
+  const hiddenChanges = [];
+  let refreshes = 0;
+  let renderState;
   const root = element(['is-collapsed']);
   const orb = element();
   const details = element();
@@ -68,14 +71,14 @@ test('opens the details panel only after clicking the orb', async () => {
   root.querySelector = (selector) => selectors.get(selector) ?? null;
 
   const quota = {
-    subscribe() { return () => {}; },
+    subscribe(listener) { renderState = listener; return () => {}; },
     subscribeEdgeHidden() { return () => {}; },
-    refreshNow() {},
+    refreshNow() { refreshes++; },
     resetQuota() {},
     moveToY() {},
     startDrag() {},
     stopDrag() {},
-    setEdgeHidden() {},
+    setEdgeHidden(hidden) { hiddenChanges.push(hidden); },
     setLayout(layout) { expandedChanges.push(layout.mode); },
   };
   const windowObject = element();
@@ -96,7 +99,11 @@ test('opens the details panel only after clicking the orb', async () => {
     window: windowObject,
     ResizeObserver: class { observe() {} disconnect() {} },
   });
+  return { root, orb, expandedChanges, hiddenChanges, windowObject, renderState, refreshes: () => refreshes };
+}
 
+test('opens the details panel only after clicking the orb', async () => {
+  const { root, orb, expandedChanges } = mount();
   root.dispatch('pointerenter');
   assert.equal(orb.attributes.get('aria-expanded'), 'false');
 
@@ -110,4 +117,78 @@ test('opens the details panel only after clicking the orb', async () => {
   await new Promise((resolve) => setTimeout(resolve, 250));
   assert.equal(root.classList.contains('is-collapsed'), true);
   assert.deepEqual(expandedChanges, ['collapsed', 'normal', 'collapsed']);
+});
+
+test('double-click refreshes without toggling the details panel or hiding the orb', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const s = mount();
+  s.orb.dispatch('click');
+  s.orb.dispatch('click');
+  s.orb.dispatch('dblclick');
+  t.mock.timers.tick(250);
+  assert.equal(s.refreshes(), 1);
+  assert.equal(s.root.classList.contains('is-collapsed'), true);
+  assert.deepEqual(s.expandedChanges, ['collapsed']);
+  assert.deepEqual(s.hiddenChanges, []);
+
+  s.orb.dispatch('click');
+  t.mock.timers.tick(250);
+  assert.equal(s.root.classList.contains('is-collapsed'), false);
+  s.orb.dispatch('click');
+  s.orb.dispatch('click');
+  s.orb.dispatch('dblclick');
+  t.mock.timers.tick(250);
+  assert.equal(s.refreshes(), 2);
+  assert.equal(s.root.classList.contains('is-collapsed'), false);
+  assert.deepEqual(s.expandedChanges, ['collapsed', 'normal']);
+  assert.deepEqual(s.hiddenChanges, []);
+});
+
+for (const pinned of [false, true]) test(`a slower double-click restores the ${pinned ? 'expanded' : 'collapsed'} panel state`, t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const s = mount();
+  if (pinned) {
+    s.orb.dispatch('click', { detail: 1 });
+    t.mock.timers.tick(250);
+  }
+  s.orb.dispatch('pointerdown', { button: 0, screenY: 100, clientY: 20, pointerId: 1 });
+  s.windowObject.dispatch('pointerup', { pointerId: 1 });
+  s.orb.dispatch('click', { detail: 1 });
+  t.mock.timers.tick(300);
+  s.orb.dispatch('pointerdown', { button: 0, screenY: 100, clientY: 20, pointerId: 1 });
+  s.windowObject.dispatch('pointerup', { pointerId: 1 });
+  s.orb.dispatch('click', { detail: 2 });
+  s.orb.dispatch('dblclick', { detail: 2 });
+  t.mock.timers.tick(250);
+  assert.equal(s.refreshes(), 1);
+  assert.equal(s.root.classList.contains('is-collapsed'), !pinned);
+  assert.deepEqual(s.hiddenChanges, []);
+});
+
+test('double-click while refreshing does not start another refresh', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const s = mount();
+  s.renderState({ status: 'loading', fiveHour: { remainingPercent: null, resetsAt: null },
+    weekly: { remainingPercent: null, resetsAt: null }, resetCredits: null,
+    lastUpdatedAt: null, errorMessage: null });
+  s.orb.dispatch('click');
+  s.orb.dispatch('dblclick');
+  t.mock.timers.tick(250);
+  assert.equal(s.refreshes(), 0);
+  assert.equal(s.root.classList.contains('is-collapsed'), true);
+  assert.deepEqual(s.hiddenChanges, []);
+});
+
+test('double-click after dragging neither refreshes nor hides the orb', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const s = mount();
+  s.orb.dispatch('pointerdown', { button: 0, screenY: 100, clientY: 20, pointerId: 1 });
+  s.windowObject.dispatch('pointermove', { screenY: 110 });
+  s.windowObject.dispatch('pointerup', { pointerId: 1 });
+  s.orb.dispatch('click');
+  s.orb.dispatch('dblclick');
+  t.mock.timers.tick(250);
+  assert.equal(s.refreshes(), 0);
+  assert.equal(s.root.classList.contains('is-collapsed'), true);
+  assert.deepEqual(s.hiddenChanges, []);
 });

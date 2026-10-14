@@ -24,7 +24,7 @@ function cloneResetCredits(resetCredits) {
         return null;
     return {
         availableCount: resetCredits.availableCount,
-        credits: resetCredits.credits.map((credit) => ({ ...credit })).sort((first, second) => {
+        credits: (resetCredits.credits ?? []).map((credit) => ({ ...credit })).sort((first, second) => {
             const firstExpiry = Number.isFinite(first.expiresAt) ? first.expiresAt : Infinity;
             const secondExpiry = Number.isFinite(second.expiresAt) ? second.expiresAt : Infinity;
             return firstExpiry - secondExpiry;
