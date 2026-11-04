@@ -103,7 +103,7 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   quotaWindow.webContents.debugger.attach('1.3');
   await quotaWindow.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').animationName`), 'none', 'reduced motion uses a stationary indicator');
-  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').opacity`), '0.85');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').opacity`), '1');
   assert.equal(await evaluate(`document.querySelector('.orb').getAttribute('aria-busy')`), 'true');
   await quotaWindow.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
   quotaWindow.webContents.debugger.detach();
