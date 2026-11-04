@@ -24,8 +24,26 @@ function element() {
   };
 }
 
-test('renders both quota rings and the two percentage-only center values', () => {
+function createRenderer() {
   let now = new Date(2026, 7, 26, 12, 0).getTime();
+  let timerId = 0;
+  const timers = new Map();
+  const setTimer = (callback, delay) => {
+    timers.set(++timerId, { callback, at: now + delay });
+    return timerId;
+  };
+  const clearTimer = (id) => timers.delete(id);
+  const advanceTime = (milliseconds) => {
+    const target = now + milliseconds;
+    while (true) {
+      const next = [...timers].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!next) break;
+      now = next[1].at;
+      timers.delete(next[0]);
+      next[1].callback();
+    }
+    now = target;
+  };
   class FixedDate extends Date {
     static now() { return now; }
   }
@@ -95,13 +113,15 @@ test('renders both quota rings and the two percentage-only center values', () =>
     confirm: () => false,
     getComputedStyle: () => ({ borderTopLeftRadius: '0px' }),
     setInterval(callback) { tickClock = callback; },
+    setTimeout: setTimer,
+    clearTimeout: clearTimer,
   };
   const context = {
     console,
     Date: FixedDate,
     document: { querySelector: (selector) => selector === '[data-quota-app]' ? root : null },
-    setTimeout,
-    clearTimeout,
+    setTimeout: setTimer,
+    clearTimeout: clearTimer,
     window: windowObject,
     ResizeObserver: class { observe() {} disconnect() {} },
   };
@@ -109,6 +129,22 @@ test('renders both quota rings and the two percentage-only center values', () =>
   const renderer = fs.readFileSync(path.join(__dirname, '..', 'dist', 'renderer', 'renderer.js'), 'utf8');
   vm.runInNewContext(renderer, context);
   assert.equal(typeof renderState, 'function');
+  return {
+    root, orb, selectors, renderState, tickClock, advanceTime,
+    fiveHourRing, weeklyRing, fiveHourCenter, weeklyCenter,
+    fiveHourCountdown, weeklyCountdown, fiveHourResetAt, weeklyResetAt,
+    get now() { return now; },
+  };
+}
+
+test('renders both quota rings and the two percentage-only center values', () => {
+  const fixture = createRenderer();
+  const {
+    root, orb, selectors, renderState, tickClock,
+    fiveHourRing, weeklyRing, fiveHourCenter, weeklyCenter,
+    fiveHourCountdown, weeklyCountdown, fiveHourResetAt, weeklyResetAt,
+  } = fixture;
+  let now = fixture.now;
 
   renderState({
     status: 'ready',
@@ -153,7 +189,7 @@ test('renders both quota rings and the two percentage-only center values', () =>
   assert.match(orb.attributes.get('title'), /每 5 分钟自动重试/);
   assert.match(orb.attributes.get('title'), /手动刷新/);
   assert.match(selectors.get('[data-accessible-status]').textContent, /上次记录/);
-  now += 2 * 60000; tickClock();
+  now += 2 * 60000; fixture.advanceTime(2 * 60000); tickClock();
   assert.match(orb.attributes.get('title'), /距上次成功更新：7 分钟/);
   renderState({ ...disconnected, status: 'loading' });
   assert.equal(root.classList['is-quota-offline'], true, 'retrying does not make old quota look fresh');
@@ -191,3 +227,101 @@ test('renders both quota rings and the two percentage-only center values', () =>
   assert.equal(selectors.get('[data-detail-window="five-hour"]').hidden, false);
   assert.equal(selectors.get('[data-plan]').textContent, 'Plus');
 });
+
+function quotaState(status) {
+  return {
+    status,
+    fiveHour: { remainingPercent: 82, resetsAt: null, windowDurationMins: 300 },
+    weekly: { remainingPercent: 64, resetsAt: null, windowDurationMins: 10_080 },
+    resetCredits: null,
+    isResetting: false,
+    lastUpdatedAt: new Date(2026, 7, 26, 12, 0).getTime(),
+    errorMessage: null,
+  };
+}
+
+test('loading marks the orb busy and preserves both previous quota values', () => {
+  const { renderState, root, orb, fiveHourRing, weeklyRing, fiveHourCenter, weeklyCenter, advanceTime, tickClock } = createRenderer();
+  renderState(quotaState('ready'));
+  renderState(quotaState('loading'));
+
+  assert.equal(root.classList['is-refreshing'], true);
+  assert.equal(orb.attributes.get('aria-busy'), 'true');
+  assert.equal(fiveHourRing.style.getPropertyValue('--progress'), '82%');
+  assert.equal(weeklyRing.style.getPropertyValue('--progress'), '64%');
+  assert.equal(fiveHourCenter.textContent, '82%');
+  assert.equal(weeklyCenter.textContent, '64%');
+  advanceTime(2000);
+  tickClock();
+  assert.equal(root.classList['is-refreshing'], true, 'loading lasts until the request settles');
+  assert.notEqual(root.classList['is-refresh-success'], true);
+});
+
+test('only loading to ready flashes success for 1000ms despite ready renders and clock ticks', () => {
+  const { renderState, root, orb, advanceTime, tickClock } = createRenderer();
+  renderState(quotaState('ready'));
+  tickClock();
+  assert.notEqual(root.classList['is-refresh-success'], true, 'initial ready is not a completed refresh');
+
+  renderState(quotaState('loading'));
+  renderState(quotaState('ready'));
+  assert.equal(root.classList['is-refreshing'], false);
+  assert.equal(orb.attributes.get('aria-busy'), 'false');
+  assert.equal(root.classList['is-refresh-success'], true);
+  advanceTime(400);
+  renderState(quotaState('ready'));
+  tickClock();
+  assert.equal(root.classList['is-refresh-success'], true, 'ordinary renders do not cancel success');
+  advanceTime(599);
+  assert.equal(root.classList['is-refresh-success'], true);
+  advanceTime(1);
+  assert.equal(root.classList['is-refresh-success'], false, 'ordinary renders do not extend the flash');
+  renderState(quotaState('ready'));
+  tickClock();
+  advanceTime(1000);
+  assert.equal(root.classList['is-refresh-success'], false, 'ready renders do not restart an expired flash');
+});
+
+test('a subsequent loading state cancels success without shortening the next successful flash', () => {
+  const { renderState, root, orb, advanceTime } = createRenderer();
+  renderState(quotaState('loading'));
+  renderState(quotaState('ready'));
+  assert.equal(root.classList['is-refresh-success'], true);
+  advanceTime(500);
+  renderState(quotaState('loading'));
+  assert.equal(root.classList['is-refresh-success'], false);
+  assert.equal(root.classList['is-refreshing'], true);
+  assert.equal(orb.attributes.get('aria-busy'), 'true');
+  advanceTime(100);
+  renderState(quotaState('ready'));
+  advanceTime(400);
+  assert.equal(root.classList['is-refresh-success'], true, 'the cancelled timer cannot clear a later flash');
+  advanceTime(599);
+  assert.equal(root.classList['is-refresh-success'], true);
+  advanceTime(1);
+  assert.equal(root.classList['is-refresh-success'], false);
+});
+
+for (const status of ['stale', 'error']) {
+  test(`loading to ${status} stops refreshing without success and keeps offline quota during retry`, () => {
+    const { renderState, root, orb, fiveHourCenter, weeklyCenter, advanceTime } = createRenderer();
+    renderState(quotaState('ready'));
+    renderState(quotaState('loading'));
+    renderState(quotaState(status));
+    assert.equal(root.classList['is-refreshing'], false);
+    assert.equal(orb.attributes.get('aria-busy'), 'false');
+    assert.notEqual(root.classList['is-refresh-success'], true);
+    assert.equal(root.classList['is-quota-offline'], true);
+
+    renderState(quotaState('loading'));
+    assert.equal(root.classList['is-refreshing'], true);
+    assert.equal(root.classList['is-quota-offline'], true, 'retry retains the gray offline treatment');
+    assert.equal(fiveHourCenter.textContent, '82%');
+    assert.equal(weeklyCenter.textContent, '64%');
+    renderState(quotaState(status));
+    renderState(quotaState('ready'));
+    assert.notEqual(root.classList['is-refresh-success'], true, 'a ready render without preceding loading does not flash');
+    advanceTime(1000);
+    assert.notEqual(root.classList['is-refresh-success'], true);
+  });
+}

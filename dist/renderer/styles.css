@@ -29,6 +29,27 @@ body { color: var(--ink); overflow: hidden; }
 .orb { position: relative; width: 76px; height: 76px; padding: 0; border: 0; border-radius: 50%; background: rgba(12, 22, 42, 0.94); color: var(--ink); cursor: ns-resize; -webkit-app-region: no-drag; }
 .is-quota-offline .orb { filter: grayscale(1); color: var(--muted); }
 .is-quota-offline .ring { opacity: .65; }
+.orb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+}
+.is-refreshing .orb::after {
+  opacity: 1;
+  background: conic-gradient(from 0deg, transparent 0deg 255deg, rgba(236,244,255,.12) 275deg, #ecf4ff 350deg, transparent 352deg);
+  animation: quota-refresh-spin 1.05s linear infinite;
+}
+.is-refresh-success .orb::after { background: #ecf4ff; animation: quota-refresh-success .95s ease-out both; }
+@keyframes quota-refresh-spin { to { transform: rotate(360deg); } }
+@keyframes quota-refresh-success { 0% { opacity: .1; } 18% { opacity: 1; } 50% { opacity: .85; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .is-refreshing .orb::after, .is-refresh-success .orb::after { animation: none; opacity: .85; }
+}
 .ring { position: absolute; border-radius: 50%; -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px)); }
 .ring--weekly { inset: 3px; background: conic-gradient(var(--weekly) var(--progress, 0%), rgba(142,92,255,.16) 0); }
 .ring--five-hour { inset: 11px; background: conic-gradient(var(--five-hour) var(--progress, 0%), rgba(55,167,255,.16) 0); }

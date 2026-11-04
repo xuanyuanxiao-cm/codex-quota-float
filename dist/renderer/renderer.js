@@ -147,6 +147,7 @@
     }
     let interaction = "collapsed";
     let latestState;
+    let refreshSuccessTimer;
     let quotaOffline = false;
     let selectedCreditId;
     let resetPending = false;
@@ -225,6 +226,7 @@
       if (credits.length) messages.push(`重置卡：${credits.length} 张将在 24 小时内到期，最快剩余 ${formatCountdown(credits[0].expiresAt, now())}`);
       if (panelSettings.notices !== false && latestNotices?.unread) messages.push(`重置动态：${latestNotices.unread} 条未读消息`);
       if (quotaOffline) messages.push(quotaConnectionText());
+      else if (latestState?.status === 'loading') messages.push('正在刷新额度…');
       orb.setAttribute('title', messages.join('\n') || '点击查看额度详情');
       orb.setAttribute('aria-label', messages.length ? `查看额度详情：${messages.join('；')}` : '查看额度详情');
     };
@@ -309,7 +311,25 @@
       syncWindowLayout();
     };
     const renderState = (state) => {
+      const wasRefreshing = latestState?.status === 'loading';
       latestState = state;
+      const refreshing = state.status === 'loading';
+      root.classList.toggle('is-refreshing', refreshing);
+      orb.setAttribute('aria-busy', String(refreshing));
+      if (state.status !== 'ready') {
+        clearTimeout(refreshSuccessTimer);
+        refreshSuccessTimer = void 0;
+        root.classList.toggle('is-refresh-success', false);
+      } else if (wasRefreshing) {
+        clearTimeout(refreshSuccessTimer);
+        root.classList.toggle('is-refresh-success', true);
+        refreshSuccessTimer = setTimeout(() => {
+          refreshSuccessTimer = void 0;
+          root.classList.toggle('is-refresh-success', false);
+        }, 1000);
+      } else if (refreshSuccessTimer === void 0) {
+        root.classList.toggle('is-refresh-success', false);
+      }
       if (state.status !== 'loading') quotaOffline = ['stale', 'error'].includes(state.status);
       root.classList.toggle('is-quota-offline', quotaOffline);
       updateQuotaSummary(state);
@@ -337,7 +357,7 @@
       reset.disabled = model.resetDisabled;
       note.textContent = model.note ?? "";
       note.hidden = model.note === null;
-      fallback.textContent = `${model.planText}. ${model.showFiveHour ? `5 Hours ${model.fiveHourText}. ` : ''}Weekly ${model.weeklyText}.${quotaOffline ? ` ${quotaConnectionText()}` : ''}`;
+      fallback.textContent = `${model.planText}. ${model.showFiveHour ? `5 Hours ${model.fiveHourText}. ` : ''}Weekly ${model.weeklyText}.${quotaOffline ? ` ${quotaConnectionText()}` : refreshing ? ' 正在刷新额度…' : ''}`;
       const alertWindows = state.alerts?.windows ?? {};
       const badge = state.alerts?.quotaBadge;
       const low = badge && badge.severity !== 'recovered';
@@ -594,6 +614,7 @@
       noticeSource?.removeEventListener('click', onNoticeSource);
       window.clearInterval?.(clockTimer);
       clearTimeout(summaryTimer);
+      clearTimeout(refreshSuccessTimer);
       resizeObserver.disconnect();
       orb.removeEventListener("click", onOrbClick);
       orb.removeEventListener('pointerenter', onOrbEnter);

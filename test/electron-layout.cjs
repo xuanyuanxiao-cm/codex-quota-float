@@ -18,7 +18,8 @@ const fixture = {
   rateLimitResetCredits: { availableCount: 1, credits: [{ id: 'test-only', status: 'available', expiresAt: 1800000000 }] },
 };
 let quotaReads = 0;
-AppServerClient.prototype.readRateLimits = async () => { quotaReads++; return fixture; };
+let quotaReadGate;
+AppServerClient.prototype.readRateLimits = async () => { quotaReads++; await quotaReadGate; return fixture; };
 AppServerClient.prototype.consumeRateLimitResetCredit = async () => { throw new Error('Consumption is forbidden in this test'); };
 let quotaWindow;
 let updateBackdrop;
@@ -74,6 +75,8 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   await app.whenReady();
   await waitFor(() => quotaWindow && !quotaWindow.webContents.isLoading(), 'renderer');
   await waitFor(() => layouts.at(-1)?.mode === 'collapsed', 'initial collapsed layout report');
+  const previewDir = path.join(__dirname, '..', 'release', 'plan-preview');
+  fs.mkdirSync(previewDir, { recursive: true });
   await waitFor(() => matchesHeight(131), 'probability label height');
   assert.equal(hit(12, 12), false);
   assert.equal(hit(50, 50), true);
@@ -84,10 +87,45 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
 
   await waitFor(() => quotaReads > 0, 'initial quota read');
   const collapsedReads = quotaReads;
+  const collapsedBounds = quotaWindow.getBounds();
+  let finishQuotaRead;
+  quotaReadGate = new Promise(resolve => { finishQuotaRead = resolve; });
   mouseClick(50, 50);
   mouseClick(50, 50, 2);
   await waitFor(() => quotaReads === collapsedReads + 1, 'collapsed double-click refresh');
+  await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  assert.equal(await evaluate(`document.querySelector('.orb').getAttribute('aria-busy')`), 'true');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').animationName`), 'quota-refresh-spin');
+  const arcTransform = await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').transform`);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').transform`), arcTransform, 'refresh arc visibly rotates');
+  fs.writeFileSync(path.join(previewDir, 'orb-refreshing.png'), (await quotaWindow.webContents.capturePage()).toPNG());
+  quotaWindow.webContents.debugger.attach('1.3');
+  await quotaWindow.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').animationName`), 'none', 'reduced motion uses a stationary indicator');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').opacity`), '0.85');
+  assert.equal(await evaluate(`document.querySelector('.orb').getAttribute('aria-busy')`), 'true');
+  await quotaWindow.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] });
+  quotaWindow.webContents.debugger.detach();
+  assert.deepEqual(quotaWindow.getBounds(), collapsedBounds, 'refresh feedback stays within existing native bounds');
+  assert.deepEqual(await evaluate(`['five-hour', 'weekly'].map(key => document.querySelector('[data-center="' + key + '"]').textContent)`), ['60%', '40%']);
+  quotaReadGate = undefined;
+  finishQuotaRead();
   await new Promise(resolve => setTimeout(resolve, 250));
+  assert.equal(await evaluate(`document.querySelector('.orb').getAttribute('aria-busy')`), 'false');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').animationName`), 'quota-refresh-success');
+  const feedbackState = {
+    status: 'ready', planType: 'plus', hasFiveHour: true,
+    fiveHour: { remainingPercent: 60, resetsAt: 1800000000 },
+    weekly: { remainingPercent: 40, resetsAt: 1800000000 }, resetCredits: fixture.rateLimitResetCredits,
+    isResetting: false, lastUpdatedAt: Date.now(), errorMessage: null,
+  };
+  const successTime = () => evaluate(`document.querySelector('.orb').getAnimations({ subtree: true }).find(animation => animation.animationName === 'quota-refresh-success')?.currentTime`);
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.ok(await successTime() >= 300, 'first success animation has advanced');
+  quotaWindow.webContents.send('quota:state', { ...feedbackState, status: 'loading' });
+  quotaWindow.webContents.send('quota:state', feedbackState);
+  assert.ok(await successTime() < 100, 'a rapid second refresh restarts the visible success flash');
   assert.equal(layouts.at(-1).mode, 'collapsed');
   assert.equal(await evaluate(`document.querySelector('[data-quota-app]').classList.contains('is-edge-hidden')`), false);
   dragActions.length = 0;
@@ -114,6 +152,7 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   const dualWindows = fixture.rateLimits;
   fixture.rateLimits = { planType: 'pro', primary: { usedPercent: 27, windowDurationMins: 10080, resetsAt: 1800000000 }, secondary: null };
   await nativeActions.get('quota:refresh-now')();
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').animationName`), 'quota-refresh-success', 'weekly-only accounts show the same refresh feedback');
   await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   assert.equal(await evaluate(`document.querySelector('[data-plan]').textContent`), 'Pro');
   assert.deepEqual(await evaluate(`['[data-window="five-hour"]', '[data-center="five-hour"]', '[data-detail-window="five-hour"]', '.center-divider'].map(s => getComputedStyle(document.querySelector(s)).display)`), ['none', 'none', 'none', 'none']);
@@ -122,8 +161,6 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   assert.equal(layouts.at(-1).height, weeklyHeight, 'renderer reports the measured weekly-only content height');
   await waitFor(() => matchesHeight(weeklyHeight), 'weekly-only height');
   assert.ok(weeklyHeight < normalHeight, 'missing five-hour row leaves no empty space');
-  const previewDir = path.join(__dirname, '..', 'release', 'plan-preview');
-  fs.mkdirSync(previewDir, { recursive: true });
   fs.writeFileSync(path.join(previewDir, 'pro-expanded.png'), (await quotaWindow.webContents.capturePage()).toPNG());
   fixture.rateLimits = dualWindows;
   await nativeActions.get('quota:refresh-now')();
@@ -182,6 +219,7 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   quotaWindow.webContents.send('quota:state', staleState);
   await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb')).filter`), 'grayscale(1)');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').animationName`), 'none', 'failed refreshes stop the indicator without a success flash');
   assert.deepEqual(await evaluate(`['five-hour', 'weekly'].map(key => document.querySelector('[data-center="' + key + '"]').textContent)`), ['60%', '40%']);
   assert.match(await evaluate(`document.querySelector('.orb').title`), /连接失败.*距上次成功更新：5 分钟/);
   assert.deepEqual(quotaWindow.getBounds(), connectedBounds, 'offline styling does not change the native window or hit regions');
@@ -190,11 +228,15 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   quotaWindow.webContents.send('quota:state', { ...staleState, status: 'loading' });
   await evaluate(`new Promise(resolve => requestAnimationFrame(resolve))`);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb')).filter`), 'grayscale(1)');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').animationName`), 'quota-refresh-spin', 'gray reconnecting quota still shows refresh activity');
   assert.match(await evaluate(`document.querySelector('.orb').title`), /正在重连/);
   quotaWindow.webContents.send('quota:state', { ...staleState, status: 'ready', lastUpdatedAt: Date.now(), errorMessage: null });
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').animationName`), 'quota-refresh-success');
   await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb')).filter`), 'none');
   assert.equal(await evaluate(`document.querySelector('.orb').title`), '点击查看额度详情');
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.orb'), '::after').opacity`), '0', 'success feedback clears after one flash');
   fs.writeFileSync(path.join(previewDir, 'orb-connected.png'), (await quotaWindow.webContents.capturePage()).toPNG());
   console.log(JSON.stringify({ electronLayout: 'passed', doubleClickRefresh: true, scaleFactor: electron.screen.getPrimaryDisplay().scaleFactor, normalHeight, pickerHeight: 360, cardConsumption: 0 }));
   if (!process.argv.includes('--interactive')) {
