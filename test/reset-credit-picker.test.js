@@ -95,7 +95,7 @@ test('Reset opens available credits with the soonest-expiring card selected with
   assert.deepEqual(calls, []);
 });
 
-test('credit choices use short reset-card labels and show only expiry and a short identifier', () => {
+test('credit choices use short reset-card labels and show expiry date and time with a short identifier', () => {
   const { selectors, renderState } = mount();
   const first = {
     ...state.resetCredits.credits[0],
@@ -110,7 +110,7 @@ test('credit choices use short reset-card labels and show only expiry and a shor
   selectors.get('[data-action="reset"]').click();
   const firstOption = selectors.get('[data-credit-list]').children[0];
   assert.equal(firstOption.children[0].textContent, '重置卡 1');
-  assert.equal(firstOption.children[1].textContent, '2027/1/15 到期 · 编号 …3456');
+  assert.equal(firstOption.children[1].textContent, '2027/1/15 12:00 到期 · 编号 …3456');
   assert.equal(selectors.get('[data-picker-selection]').textContent, '将使用：重置卡 1');
 });
 

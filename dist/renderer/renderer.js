@@ -283,7 +283,10 @@
         name.textContent = creditName(index);
         const expiry = document.createElement("span");
         const expiryText = Number.isFinite(credit.expiresAt)
-          ? `${new Date(toMillis(credit.expiresAt)).toLocaleDateString("zh-CN")} 到期`
+          ? `${new Date(toMillis(credit.expiresAt)).toLocaleString("zh-CN", {
+            year: "numeric", month: "numeric", day: "numeric",
+            hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+          })} 到期`
           : "到期时间未知";
         expiry.textContent = `${expiryText} · 编号 …${credit.id.slice(-4)}`;
         option.append(name, expiry);

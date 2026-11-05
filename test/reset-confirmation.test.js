@@ -8,7 +8,7 @@ async function setup(t, response) {
   const dialogs = [];
   const credits = [
     { id: 'first-credit-1234', status: 'available', title: 'A very long original title', expiresAt: new Date(2027, 0, 15, 12).getTime() / 1000 },
-    { id: 'second-credit-5678', status: 'available', expiresAt: new Date(2027, 1, 15, 12).getTime() / 1000 },
+    { id: 'second-credit-5678', status: 'available', expiresAt: new Date(2027, 1, 15, 0, 5).getTime() / 1000 },
   ];
   const controller = new RefreshController({
     onRateLimitsUpdated: () => () => {},
@@ -43,7 +43,7 @@ test('confirmation describes the selected card, defaults to Cancel, and redeems 
   assert.equal(dialogs[0].window, parent);
   const { options } = dialogs[0];
   assert.match(options.message, /重置卡 2/);
-  assert.match(options.detail, /2027\/2\/15.*…5678/);
+  assert.match(options.detail, /2027\/2\/15 00:05 到期 · 编号 …5678/);
   assert.match(options.detail, /消耗/);
   assert.deepEqual(options.buttons, ['取消', '确认使用']);
   assert.equal(options.defaultId, 0);
