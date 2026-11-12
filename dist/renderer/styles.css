@@ -27,6 +27,7 @@ body { color: var(--ink); overflow: hidden; }
 .is-collapsed .orb-shell { min-height: 76px; }
 .orb-shell { display: flex; flex-shrink: 0; min-height: 92px; align-items: center; justify-content: flex-end; }
 .orb { position: relative; width: 76px; height: 76px; padding: 0; border: 0; border-radius: 50%; background: rgba(12, 22, 42, 0.94); color: var(--ink); cursor: ns-resize; -webkit-app-region: no-drag; }
+.orb:focus-visible { outline: 2px solid var(--five-hour); outline-offset: -2px; }
 .is-quota-offline .orb { filter: grayscale(1); color: var(--muted); }
 .is-quota-offline .ring { opacity: .65; }
 .orb::after {
