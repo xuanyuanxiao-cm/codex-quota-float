@@ -85,6 +85,21 @@ const matchesHeight = (height) => Math.abs(quotaWindow.getBounds().height - heig
   const background = await evaluate(`getComputedStyle(document.body).backgroundColor`);
   assert.equal(background, 'rgba(0, 0, 0, 0)');
 
+  const debuggerSession = quotaWindow.webContents.debugger;
+  debuggerSession.attach('1.3');
+  await debuggerSession.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+  for (const type of ['keyDown', 'keyUp']) {
+    await debuggerSession.sendCommand('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+  }
+  const orbOutline = () => evaluate(`getComputedStyle(document.querySelector('.orb')).outlineStyle`);
+  assert.notEqual(await orbOutline(), 'none', 'Tab must show the orb focus indicator');
+  mouseClick(50, 50);
+  await waitFor(() => layouts.at(-1)?.mode === 'normal', 'clicking the keyboard-focused orb opens the panel');
+  assert.equal(await orbOutline(), 'none', 'clicking a focused orb must clear the outline');
+  mouseClick(236, 58);
+  await waitFor(() => layouts.at(-1)?.mode === 'collapsed', 'clicking again collapses the panel');
+  debuggerSession.detach();
+
   await waitFor(() => quotaReads > 0, 'initial quota read');
   const collapsedReads = quotaReads;
   const collapsedBounds = quotaWindow.getBounds();

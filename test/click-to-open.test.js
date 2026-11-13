@@ -26,7 +26,7 @@ function element(initialClasses = []) {
     getBoundingClientRect() { return { x: 0, y: 0, width: 100, height: 100 }; },
     addEventListener(type, listener) { listeners.set(type, listener); },
     removeEventListener(type) { listeners.delete(type); },
-    dispatch(type, event = {}) { listeners.get(type)?.(event); },
+    dispatch(type, event = {}) { listeners.get(type)?.({ preventDefault() {}, ...event }); },
     setAttribute(name, value) { attributes.set(name, value); },
   };
 }

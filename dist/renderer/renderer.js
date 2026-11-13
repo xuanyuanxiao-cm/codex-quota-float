@@ -420,6 +420,9 @@
     };
     const onOrbPointerDown = (event) => {
       if (event.button !== 0) return;
+      // A click can keep the keyboard focus ring when the orb already has focus.
+      event.preventDefault();
+      if (document.activeElement === orb) orb.blur();
       clickArbiter.cancelSingle();
       if (interaction !== "pinned") {
         interaction = "collapsed";
