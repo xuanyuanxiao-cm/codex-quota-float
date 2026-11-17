@@ -3,12 +3,13 @@ const test = require('node:test');
 const { createMainWindow, dockWindowOnRight, createAppServerUnavailableState } = require('../dist/main');
 const { rightDockPosition, rightDockBounds } = require('../dist/window-position');
 
-test('main window starts collapsed with its icon and isolated renderer', () => {
+test('main window starts collapsed, skips the taskbar, and isolates its renderer', () => {
   let options, loaded;
   createMainWindow(class { constructor(value) { options = value; } loadFile(file) { loaded = file; } },
     'preload.js', 'index.html', 'quota.ico');
   assert.equal(options.width, 100); assert.equal(options.height, 100);
   assert.equal(options.icon, 'quota.ico'); assert.equal(loaded, 'index.html');
+  assert.equal(options.skipTaskbar, true);
   assert.equal(options.webPreferences.contextIsolation, true);
   assert.equal(options.webPreferences.nodeIntegration, false);
 });

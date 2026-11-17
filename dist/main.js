@@ -98,6 +98,7 @@ function createMainWindow(BrowserWindow, preloadPath = node_path_1.default.join(
         backgroundColor: '#00000000',
         frame: false,
         alwaysOnTop: true,
+        skipTaskbar: true,
         resizable: false,
         hasShadow: false,
         webPreferences: {
